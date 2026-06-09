@@ -435,66 +435,56 @@ function normalizarTexto(txt) {
 // PARSER UNICRED
 // ══════════════════════════════════════════════════════
 function parsearUnicred(texto) {
-  const linhas = texto.split('\n');
   const lancamentos = [];
-  let dentroLancamentos = false;
   const anoAtual = new Date().getFullYear();
-
   const MESES_PT = { jan:1, fev:2, mar:3, abr:4, mai:5, jun:6, jul:7, ago:8, set:9, out:10, nov:11, dez:12 };
 
-  for (let linha of linhas) {
-    linha = linha.trim();
+  // Estratégia: buscar padrões de data+valor em todo o texto (linha a linha e também colado)
+  // Padrão: DD/mmm (espaço opcional) DESCRICAO (espaço opcional) R$ VALOR
+  // Funciona com ou sem espaços entre os tokens
+  const RE_LANCAMENTO = /(\d{1,2})\/([a-zA-Z]{3})\s*(.*?)\s*R\$\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
 
-    // Detecta início da seção de lançamentos
-    if (/LANÇAMENTOS|LANCAMENTOS/i.test(linha)) { dentroLancamentos = true; continue; }
-    if (!dentroLancamentos) continue;
-    if (/TOTAL DE ACELERA|TOTAL DA EMPRESA|FALE CONOSCO|RECIBO|FICHA/i.test(linha)) break;
+  // Junta todo o texto e busca ocorrências
+  // Remove quebras de linha para pegar lançamentos que podem ter sido quebrados
+  const textoFlat = texto.replace(/\n/g, ' ');
 
-    // Pular pagamentos, cabeçalhos
-    if (/Pagamento Recebido|DATA\s+DESCRIÇÃO|VALOR/i.test(linha)) continue;
-    if (/^Pág/i.test(linha)) continue;
-
-    // Padrão: DD/mmm DESCRICAO R$ VALOR  (pode ter espaços extras entre chars)
-    // Normalizar primeiro
-    const norm = linha.replace(/\s+/g, ' ');
-
-    // Tenta extrair data no formato DD/mmm ou DD/MM
-    const match = norm.match(/^(\d{1,2})\s*\/\s*([a-zA-Z]{3}|\d{2})\s+(.+?)\s+R\$\s*([\d.,]+)\s*$/i);
-    if (!match) continue;
-
-    const dia = match[1].padStart(2, '0');
-    const mesStr = match[2];
-    const desc = match[3].trim();
-    const valorStr = match[4].replace('.', '').replace(',', '.');
-    const valor = parseFloat(valorStr);
+  let m;
+  while ((m = RE_LANCAMENTO.exec(textoFlat)) !== null) {
+    const dia    = m[1].padStart(2, '0');
+    const mesStr = m[2].toLowerCase().substring(0, 3);
+    const desc   = m[3].trim();
+    const valorRaw = m[4].replace(/\./g, '').replace(',', '.');
+    const valor  = parseFloat(valorRaw);
 
     if (!valor || valor <= 0) continue;
-    if (/Pagamento Recebido/i.test(desc)) continue;
+    if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(desc)) continue;
+    if (/TOTAL|SALDO|FATURA/i.test(desc) && valor > 1000) continue;
 
-    let mesNum;
-    if (/^\d{2}$/.test(mesStr)) {
-      mesNum = parseInt(mesStr);
-    } else {
-      mesNum = MESES_PT[mesStr.toLowerCase().substring(0, 3)] || new Date().getMonth() + 1;
-    }
-
+    const mesNum = MESES_PT[mesStr] || (new Date().getMonth() + 1);
     const dataISO = `${anoAtual}-${String(mesNum).padStart(2,'0')}-${dia}`;
 
-    // Parcela
-    const parcMatch = desc.match(/Parc\.\s*(\d+\/\d+)/i);
+    const parcMatch = desc.match(/Parc[.\s]*(\d+\/\d+)/i);
     const parcela = parcMatch ? parcMatch[1] : '';
+    const fornecedor = desc.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || desc;
 
     lancamentos.push({
       data: dataISO,
-      fornecedor: desc.replace(/Parc\.\s*\d+\/\d+/i, '').trim(),
-      descricao: desc,
+      fornecedor,
+      descricao: desc || fornecedor,
       parcela,
       valor,
       categoria: sugerirCategoria(desc),
     });
   }
 
-  return lancamentos;
+  // Remove duplicatas exatas (mesma data + valor)
+  const vistos = new Set();
+  return lancamentos.filter(l => {
+    const chave = `${l.data}-${l.valor}-${l.fornecedor.substring(0,8)}`;
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
 }
 
 // ══════════════════════════════════════════════════════
