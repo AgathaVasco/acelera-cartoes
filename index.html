@@ -483,13 +483,9 @@ function parsearUnicred(texto, textoRaw) {
       lancamentos.push({ data: dataISO, fornecedor, descricao: descRaw || fornecedor, parcela, valor, categoria: sugerirCategoria(descRaw) });
     }
 
-    const vistos = new Set();
-    return lancamentos.filter(l => {
-      const chave = `${l.data}-${l.valor}`;
-      if (vistos.has(chave)) return false;
-      vistos.add(chave);
-      return true;
-    });
+    // Sem deduplicação: dois lançamentos com mesmo valor/data podem ser legítimos
+    // (ex: antecipação de parcela). O usuário revisa na tabela antes de confirmar.
+    return lancamentos;
   }
 
   // Tenta texto normal primeiro; se não achar nada, tenta texto bruto
@@ -746,7 +742,7 @@ function mostrarTabelaRevisao(items) {
   items.forEach((item, i) => {
     const clsCat = item.categoria ? 'com-cat' : 'sem-cat';
     html += `<tr>
-      <td><input type="checkbox" class="chk-item" data-idx="${i}" checked /></td>
+      <td><input type="checkbox" class="chk-item" data-idx="${i}" checked onchange="atualizarTotalPreview()" /></td>
       <td>${item.data ? new Date(item.data+'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
       <td>${item.descricao || item.fornecedor}</td>
       <td><strong>${fmt(item.valor)}</strong></td>
@@ -761,13 +757,31 @@ function mostrarTabelaRevisao(items) {
     </tr>`;
   });
 
-  html += `</tbody></table></div>`;
+  html += `</tbody>
+    <tfoot>
+      <tr style="background:#f0f4ff;font-weight:bold;border-top:2px solid #c0c8e0">
+        <td colspan="3" style="padding:10px 8px;text-align:right">Total selecionado:</td>
+        <td id="total-imp-preview" style="padding:10px 8px;font-size:1.05rem;color:#1a237e">${fmt(total)}</td>
+        <td colspan="3"></td>
+      </tr>
+    </tfoot>
+  </table></div>`;
   document.getElementById('imp-conteudo').innerHTML = html;
   document.getElementById('btn-confirmar-imp').style.display = 'inline-block';
+  atualizarTotalPreview();
+}
+
+function atualizarTotalPreview() {
+  const totalEl = document.getElementById('total-imp-preview');
+  if (!totalEl) return;
+  const checados = [...document.querySelectorAll('.chk-item:checked')].map(c => Number(c.dataset.idx));
+  const soma = checados.reduce((s, i) => s + (lancamentosImportados[i]?.valor || 0), 0);
+  totalEl.textContent = fmt(soma);
 }
 
 function toggleTodos(chk) {
   document.querySelectorAll('.chk-item').forEach(c => c.checked = chk.checked);
+  atualizarTotalPreview();
 }
 
 function atualizarCat(idx, sel) {
