@@ -610,24 +610,41 @@ async function lerPDF(input) {
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let textoCompleto = '';
 
+    // Monta uma linha respeitando gaps entre itens (resolve PDFs com letra espaçada)
+    function montarLinha(itens) {
+      if (!itens.length) return '';
+      let resultado = itens[0].txt;
+      for (let i = 1; i < itens.length; i++) {
+        const ant = itens[i - 1];
+        const cur = itens[i];
+        const gap = cur.x - (ant.x + (ant.w || 0));
+        // Gap pequeno = letra espaçada, junta sem espaço; gap grande = espaço entre palavras
+        resultado += (gap > 2 ? ' ' : '') + cur.txt;
+      }
+      return resultado.trim();
+    }
+
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
-      // Agrupa itens por linha usando posição Y
-      const itens = content.items.map(it => ({ x: it.transform[4], y: it.transform[5], txt: it.str }));
+      const itens = content.items
+        .filter(it => it.str && it.str.trim())
+        .map(it => ({ x: it.transform[4], y: it.transform[5], txt: it.str, w: it.width || 0 }));
       itens.sort((a, b) => b.y - a.y || a.x - b.x);
-      let linhaAtual = [], yAtual = null;
+
+      let grupo = [], yAtual = null;
       for (const it of itens) {
-        if (yAtual === null || Math.abs(it.y - yAtual) < 3) {
-          linhaAtual.push(it.txt);
+        if (yAtual === null || Math.abs(it.y - yAtual) < 4) {
+          grupo.push(it);
           yAtual = it.y;
         } else {
-          textoCompleto += linhaAtual.join(' ').trim() + '\n';
-          linhaAtual = [it.txt];
+          const linha = montarLinha(grupo);
+          if (linha) textoCompleto += linha + '\n';
+          grupo = [it];
           yAtual = it.y;
         }
       }
-      if (linhaAtual.length) textoCompleto += linhaAtual.join(' ').trim() + '\n';
+      if (grupo.length) textoCompleto += montarLinha(grupo) + '\n';
       textoCompleto += '\n';
     }
 
