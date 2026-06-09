@@ -648,6 +648,10 @@ async function lerPDF(input) {
       textoCompleto += '\n';
     }
 
+    // DEBUG: mostra primeiras linhas extraídas
+    const linhasDebug = textoCompleto.split('\n').filter(l => l.trim()).slice(0, 40);
+    console.log('=== TEXTO EXTRAÍDO PDF ===\n' + linhasDebug.join('\n'));
+
     // Detecta banco pelo conteúdo
     const banco = cartaoImportando === 'bb' || /Banco do Brasil|SALDO FATURA ANTERIOR|Ricieri|Ourocard/i.test(textoCompleto) ? 'bb' : 'unicred';
     const items = banco === 'bb' ? parsearBB(textoCompleto) : parsearUnicred(textoCompleto);
