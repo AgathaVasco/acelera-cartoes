@@ -434,57 +434,59 @@ function normalizarTexto(txt) {
 // ══════════════════════════════════════════════════════
 // PARSER UNICRED
 // ══════════════════════════════════════════════════════
-function parsearUnicred(texto) {
-  const lancamentos = [];
+function parsearUnicred(texto, textoRaw) {
   const anoAtual = new Date().getFullYear();
   const MESES_PT = { jan:1, fev:2, mar:3, abr:4, mai:5, jun:6, jul:7, ago:8, set:9, out:10, nov:11, dez:12 };
 
   // Aceita DD/abr ou DD/04 (mês numérico ou abreviado)
   const RE_LANCAMENTO = /(\d{1,2})\/(([a-zA-Z]{3})|(\d{2}))\s*(.*?)\s*R\$\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
 
-  const textoFlat = texto.replace(/\n/g, ' ');
+  function extrairDe(textoBase) {
+    const lancamentos = [];
+    const flat = textoBase.replace(/\n/g, ' ');
 
-  // Debug: mostra linhas com padrão de data ou R$ para diagnóstico
-  const linhasDebug = texto.split('\n').filter(l => /\d\/[a-zA-Z\d]|R\$/.test(l));
-  console.log('=== LINHAS COM DATA/VALOR (' + linhasDebug.length + ') ===\n' + linhasDebug.slice(0, 30).join('\n'));
+    let m;
+    const re = new RegExp(RE_LANCAMENTO.source, 'gi');
+    while ((m = re.exec(flat)) !== null) {
+      const dia    = m[1].padStart(2, '0');
+      const mesRaw = m[2].toLowerCase();
+      const desc   = m[5].trim();
+      const valorRaw = m[6].replace(/\./g, '').replace(',', '.');
+      const valor  = parseFloat(valorRaw);
 
-  let m;
-  while ((m = RE_LANCAMENTO.exec(textoFlat)) !== null) {
-    const dia    = m[1].padStart(2, '0');
-    const mesRaw = m[2].toLowerCase();
-    const desc   = m[5].trim();
-    const valorRaw = m[6].replace(/\./g, '').replace(',', '.');
-    const valor  = parseFloat(valorRaw);
+      if (!valor || valor <= 0) continue;
+      if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(desc)) continue;
+      if (/TOTAL|SALDO|FATURA/i.test(desc) && valor > 1000) continue;
 
-    if (!valor || valor <= 0) continue;
-    if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(desc)) continue;
-    if (/TOTAL|SALDO|FATURA/i.test(desc) && valor > 1000) continue;
+      const mesNum = /^\d+$/.test(mesRaw) ? parseInt(mesRaw) : (MESES_PT[mesRaw.substring(0,3)] || (new Date().getMonth() + 1));
+      const dataISO = `${anoAtual}-${String(mesNum).padStart(2,'0')}-${dia}`;
 
-    const mesNum = /\d+/.test(mesRaw) ? parseInt(mesRaw) : (MESES_PT[mesRaw.substring(0,3)] || (new Date().getMonth() + 1));
-    const dataISO = `${anoAtual}-${String(mesNum).padStart(2,'0')}-${dia}`;
+      const parcMatch = desc.match(/Parc[.\s]*(\d+\/\d+)/i);
+      const parcela = parcMatch ? parcMatch[1] : '';
+      const fornecedor = (desc.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || desc).substring(0, 60);
 
-    const parcMatch = desc.match(/Parc[.\s]*(\d+\/\d+)/i);
-    const parcela = parcMatch ? parcMatch[1] : '';
-    const fornecedor = (desc.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || desc).substring(0, 60);
+      lancamentos.push({ data: dataISO, fornecedor, descricao: desc || fornecedor, parcela, valor, categoria: sugerirCategoria(desc) });
+    }
 
-    lancamentos.push({
-      data: dataISO,
-      fornecedor,
-      descricao: desc || fornecedor,
-      parcela,
-      valor,
-      categoria: sugerirCategoria(desc),
+    // Remove duplicatas
+    const vistos = new Set();
+    return lancamentos.filter(l => {
+      const chave = `${l.data}-${l.valor}-${l.fornecedor.substring(0,8)}`;
+      if (vistos.has(chave)) return false;
+      vistos.add(chave);
+      return true;
     });
   }
 
-  // Remove duplicatas exatas (mesma data + valor)
-  const vistos = new Set();
-  return lancamentos.filter(l => {
-    const chave = `${l.data}-${l.valor}-${l.fornecedor.substring(0,8)}`;
-    if (vistos.has(chave)) return false;
-    vistos.add(chave);
-    return true;
-  });
+  // Tenta texto normal primeiro; se não achar nada, tenta texto bruto
+  const resultado = extrairDe(texto);
+  if (resultado.length > 0) return resultado;
+
+  if (textoRaw) {
+    console.log('Texto normal sem resultados — tentando texto bruto...');
+    return extrairDe(textoRaw);
+  }
+  return [];
 }
 
 // ══════════════════════════════════════════════════════
@@ -598,8 +600,8 @@ async function lerPDF(input) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let textoCompleto = '';
+    let textoRaw = ''; // texto bruto concatenado sem agrupamento (fallback)
 
-    // Monta uma linha respeitando gaps entre itens (resolve PDFs com letra espaçada)
     function montarLinha(itens) {
       if (!itens.length) return '';
       let resultado = itens[0].txt;
@@ -607,7 +609,6 @@ async function lerPDF(input) {
         const ant = itens[i - 1];
         const cur = itens[i];
         const gap = cur.x - (ant.x + (ant.w || 0));
-        // Gap pequeno = letra espaçada, junta sem espaço; gap grande = espaço entre palavras
         resultado += (gap > 2 ? ' ' : '') + cur.txt;
       }
       return resultado.trim();
@@ -619,8 +620,12 @@ async function lerPDF(input) {
       const itens = content.items
         .filter(it => it.str && it.str.trim())
         .map(it => ({ x: it.transform[4], y: it.transform[5], txt: it.str, w: it.width || 0 }));
-      itens.sort((a, b) => b.y - a.y || a.x - b.x);
 
+      // texto bruto: ordem de aparição no PDF, sem agrupamento
+      itens.forEach(it => { textoRaw += it.txt; });
+      textoRaw += '\n';
+
+      itens.sort((a, b) => b.y - a.y || a.x - b.x);
       let grupo = [], yAtual = null;
       for (const it of itens) {
         if (yAtual === null || Math.abs(it.y - yAtual) < 4) {
@@ -637,13 +642,14 @@ async function lerPDF(input) {
       textoCompleto += '\n';
     }
 
-    // DEBUG: mostra primeiras linhas extraídas
-    const linhasDebug = textoCompleto.split('\n').filter(l => l.trim()).slice(0, 40);
-    console.log('=== TEXTO EXTRAÍDO PDF ===\n' + linhasDebug.join('\n'));
+    // DEBUG: mostra linhas com padrões de transação
+    const linhasDebug = textoCompleto.split('\n').filter(l => /\d\/[a-zA-Z\d]|R\$/.test(l));
+    console.log('=== LINHAS COM DATA/VALOR ===\n' + linhasDebug.slice(0,30).join('\n'));
+    console.log('=== TEXTO RAW (primeiros 500 chars) ===\n' + textoRaw.substring(0,500));
 
     // Detecta banco pelo conteúdo
     const banco = cartaoImportando === 'bb' || /Banco do Brasil|SALDO FATURA ANTERIOR|Ricieri|Ourocard/i.test(textoCompleto) ? 'bb' : 'unicred';
-    const items = banco === 'bb' ? parsearBB(textoCompleto) : parsearUnicred(textoCompleto);
+    const items = banco === 'bb' ? parsearBB(textoCompleto) : parsearUnicred(textoCompleto, textoRaw);
 
     if (!items.length) {
       document.getElementById('imp-conteudo').innerHTML = `
