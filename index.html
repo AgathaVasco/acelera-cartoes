@@ -219,6 +219,7 @@
   <button onclick="irPara('unicred', this)">Unicred</button>
   <button onclick="irPara('conciliacao', this)">Conciliação</button>
   <button onclick="irPara('relatorio', this)">Relatório</button>
+  <button onclick="abrirCategorias()" style="margin-left:auto">⚙ Categorias</button>
 </nav>
 
 <main>
@@ -315,6 +316,20 @@
 </div>
 
 <!-- ══ MODAL IMPORTAR PDF ══ -->
+<div class="overlay" id="overlay-categorias">
+  <div class="modal" style="max-width:480px">
+    <h2>⚙ Gerenciar Categorias</h2>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <input id="nova-cat-input" type="text" placeholder="Nova categoria..." style="flex:1;padding:9px 12px;border:1px solid #ccc;border-radius:8px;font-size:.95rem" onkeydown="if(event.key==='Enter')adicionarCategoria()" />
+      <button class="btn btn-verde" onclick="adicionarCategoria()">+ Adicionar</button>
+    </div>
+    <div id="lista-categorias" style="max-height:55vh;overflow-y:auto"></div>
+    <div class="modal-btns">
+      <button class="btn btn-cinza" onclick="fecharCategorias()">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-importar">
   <div class="modal modal-xl">
     <h2 id="imp-titulo">Importar Fatura PDF</h2>
@@ -353,7 +368,7 @@ const CARTOES = [
   { id: 'unicred', nome: 'Unicred'         },
 ];
 
-const CATEGORIAS = [
+const CATEGORIAS_PADRAO = [
   'Alimentação / Refeições',
   'Combustível',
   'Hospedagem / Hotel',
@@ -371,6 +386,20 @@ const CATEGORIAS = [
   'Anuidade / Tarifa Bancária',
   'Outros',
 ];
+
+function getCategorias() {
+  try {
+    const salvas = JSON.parse(localStorage.getItem('categorias_custom') || 'null');
+    return salvas || CATEGORIAS_PADRAO;
+  } catch { return CATEGORIAS_PADRAO; }
+}
+
+function salvarCategorias(lista) {
+  localStorage.setItem('categorias_custom', JSON.stringify(lista));
+}
+
+// CATEGORIAS é sempre lido via getCategorias() — mantido como alias para compatibilidade
+let CATEGORIAS = getCategorias();
 
 const CENTROS = ['Administrativo','Comercial','Operacional','TI','Marketing','Financeiro','Diretoria'];
 const MESES   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -596,6 +625,63 @@ function abrirImportar(cartaoId) {
       <input type="file" id="inp-pdf" accept=".pdf" onchange="lerPDF(this)" />
     </div>`;
   document.getElementById('overlay-importar').classList.add('aberto');
+}
+
+// ══════════════════════════════════════════════════════
+// GERENCIAR CATEGORIAS
+// ══════════════════════════════════════════════════════
+function abrirCategorias() {
+  renderListaCategorias();
+  document.getElementById('overlay-categorias').classList.add('aberto');
+  document.getElementById('nova-cat-input').focus();
+}
+
+function fecharCategorias() {
+  document.getElementById('overlay-categorias').classList.remove('aberto');
+}
+
+function renderListaCategorias() {
+  const cats = getCategorias();
+  const lista = document.getElementById('lista-categorias');
+  if (!cats.length) {
+    lista.innerHTML = '<p style="color:#888;text-align:center;padding:20px">Nenhuma categoria cadastrada.</p>';
+    return;
+  }
+  lista.innerHTML = cats.map((c, i) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid #eee;gap:8px">
+      <span style="flex:1">${c}</span>
+      ${c === 'Outros' ? '' : `<button class="btn btn-sm btn-vermelho" onclick="removerCategoria(${i})" title="Remover">✕</button>`}
+    </div>`).join('');
+}
+
+function adicionarCategoria() {
+  const input = document.getElementById('nova-cat-input');
+  const nome = input.value.trim();
+  if (!nome) return;
+  const cats = getCategorias();
+  if (cats.includes(nome)) {
+    alert('Categoria "' + nome + '" já existe.');
+    return;
+  }
+  // Insere antes de "Outros"
+  const idx = cats.indexOf('Outros');
+  if (idx >= 0) cats.splice(idx, 0, nome);
+  else cats.push(nome);
+  salvarCategorias(cats);
+  CATEGORIAS = cats;
+  input.value = '';
+  input.focus();
+  renderListaCategorias();
+}
+
+function removerCategoria(idx) {
+  const cats = getCategorias();
+  const nome = cats[idx];
+  if (!confirm(`Remover a categoria "${nome}"?`)) return;
+  cats.splice(idx, 1);
+  salvarCategorias(cats);
+  CATEGORIAS = cats;
+  renderListaCategorias();
 }
 
 function fecharImportar() {
