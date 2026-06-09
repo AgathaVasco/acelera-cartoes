@@ -441,13 +441,28 @@ function parsearUnicred(texto, textoRaw) {
   // Aceita DD/abr ou DD/04 (mês numérico ou abreviado)
   const RE_LANCAMENTO = /(\d{1,2})\/(([a-zA-Z]{3})|(\d{2}))\s*(.*?)\s*R\$\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
 
-  function extrairDe(textoBase) {
+  function extrairDe(textoBase, label) {
     const lancamentos = [];
     const flat = textoBase.replace(/\n/g, ' ');
 
+    // Diagnóstico: encontra primeiro padrão de data e R$
+    const dateTest = /\d\/(mar|abr|mai|jan|fev|jun|jul|ago|set|out|nov|dez|\d{2})/i.exec(flat);
+    console.log('[' + (label||'?') + '] data encontrada:', dateTest?.[0]);
+    const rIdx = flat.indexOf('R');
+    // Mostra código do próximo char depois de R (verifica se é $ ou outro símbolo)
+    for (let i = 0; i < flat.length - 1; i++) {
+      if (flat[i] === 'R' && (flat[i+1] === '$' || flat.charCodeAt(i+1) > 127)) {
+        console.log('[' + (label||'?') + '] R seguido de char:', JSON.stringify(flat[i+1]), 'código:', flat.charCodeAt(i+1));
+        break;
+      }
+    }
+
     let m;
+    // Tenta R$ normal; se não achar, tenta R seguido de qualquer símbolo de moeda
     const re = new RegExp(RE_LANCAMENTO.source, 'gi');
-    while ((m = re.exec(flat)) !== null) {
+    const reAlt = /(\d{1,2})\/(([a-zA-Z]{3})|(\d{2}))\s*(.*?)\s*R[\$＄＄]?\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
+    const reUsar = re;
+    while ((m = reUsar.exec(flat)) !== null) {
       const dia    = m[1].padStart(2, '0');
       const mesRaw = m[2].toLowerCase();
       const desc   = m[5].trim();
@@ -479,12 +494,12 @@ function parsearUnicred(texto, textoRaw) {
   }
 
   // Tenta texto normal primeiro; se não achar nada, tenta texto bruto
-  const resultado = extrairDe(texto);
+  const resultado = extrairDe(texto, 'normal');
   if (resultado.length > 0) return resultado;
 
   if (textoRaw) {
-    console.log('Texto normal sem resultados — tentando texto bruto...');
-    return extrairDe(textoRaw);
+    console.log('Tentando texto bruto...');
+    return extrairDe(textoRaw, 'raw');
   }
   return [];
 }
