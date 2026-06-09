@@ -642,10 +642,13 @@ async function lerPDF(input) {
       textoCompleto += '\n';
     }
 
-    // DEBUG: mostra linhas com padrões de transação
+    // DEBUG
     const linhasDebug = textoCompleto.split('\n').filter(l => /\d\/[a-zA-Z\d]|R\$/.test(l));
     console.log('=== LINHAS COM DATA/VALOR ===\n' + linhasDebug.slice(0,30).join('\n'));
-    console.log('=== TEXTO RAW (primeiros 500 chars) ===\n' + textoRaw.substring(0,500));
+    console.log('RAW total chars:', textoRaw.length);
+    console.log('RAW 0-800:\n' + textoRaw.substring(0,800));
+    console.log('RAW 800-1600:\n' + textoRaw.substring(800,1600));
+    console.log('RAW 1600-2400:\n' + textoRaw.substring(1600,2400));
 
     // Detecta banco pelo conteúdo
     const banco = cartaoImportando === 'bb' || /Banco do Brasil|SALDO FATURA ANTERIOR|Ricieri|Ourocard/i.test(textoCompleto) ? 'bb' : 'unicred';
