@@ -439,33 +439,33 @@ function parsearUnicred(texto) {
   const anoAtual = new Date().getFullYear();
   const MESES_PT = { jan:1, fev:2, mar:3, abr:4, mai:5, jun:6, jul:7, ago:8, set:9, out:10, nov:11, dez:12 };
 
-  // Estratégia: buscar padrões de data+valor em todo o texto (linha a linha e também colado)
-  // Padrão: DD/mmm (espaço opcional) DESCRICAO (espaço opcional) R$ VALOR
-  // Funciona com ou sem espaços entre os tokens
-  const RE_LANCAMENTO = /(\d{1,2})\/([a-zA-Z]{3})\s*(.*?)\s*R\$\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
+  // Aceita DD/abr ou DD/04 (mês numérico ou abreviado)
+  const RE_LANCAMENTO = /(\d{1,2})\/(([a-zA-Z]{3})|(\d{2}))\s*(.*?)\s*R\$\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
 
-  // Junta todo o texto e busca ocorrências
-  // Remove quebras de linha para pegar lançamentos que podem ter sido quebrados
   const textoFlat = texto.replace(/\n/g, ' ');
+
+  // Debug: mostra linhas com padrão de data ou R$ para diagnóstico
+  const linhasDebug = texto.split('\n').filter(l => /\d\/[a-zA-Z\d]|R\$/.test(l));
+  console.log('=== LINHAS COM DATA/VALOR (' + linhasDebug.length + ') ===\n' + linhasDebug.slice(0, 30).join('\n'));
 
   let m;
   while ((m = RE_LANCAMENTO.exec(textoFlat)) !== null) {
     const dia    = m[1].padStart(2, '0');
-    const mesStr = m[2].toLowerCase().substring(0, 3);
-    const desc   = m[3].trim();
-    const valorRaw = m[4].replace(/\./g, '').replace(',', '.');
+    const mesRaw = m[2].toLowerCase();
+    const desc   = m[5].trim();
+    const valorRaw = m[6].replace(/\./g, '').replace(',', '.');
     const valor  = parseFloat(valorRaw);
 
     if (!valor || valor <= 0) continue;
     if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(desc)) continue;
     if (/TOTAL|SALDO|FATURA/i.test(desc) && valor > 1000) continue;
 
-    const mesNum = MESES_PT[mesStr] || (new Date().getMonth() + 1);
+    const mesNum = /\d+/.test(mesRaw) ? parseInt(mesRaw) : (MESES_PT[mesRaw.substring(0,3)] || (new Date().getMonth() + 1));
     const dataISO = `${anoAtual}-${String(mesNum).padStart(2,'0')}-${dia}`;
 
     const parcMatch = desc.match(/Parc[.\s]*(\d+\/\d+)/i);
     const parcela = parcMatch ? parcMatch[1] : '';
-    const fornecedor = desc.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || desc;
+    const fornecedor = (desc.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || desc).substring(0, 60);
 
     lancamentos.push({
       data: dataISO,
@@ -565,7 +565,6 @@ function abrirImportar(cartaoId) {
   const c = CARTOES.find(x => x.id === cartaoId);
   document.getElementById('imp-titulo').textContent = `Importar Fatura — ${c.nome}`;
   document.getElementById('btn-confirmar-imp').style.display = 'none';
-  document.getElementById('inp-pdf').value = '';
   document.getElementById('imp-conteudo').innerHTML = `
     <div class="info-box">
       Selecione o PDF da fatura. O sistema lerá os lançamentos automaticamente e sugerirá categorias. Você só precisa revisar e confirmar.
