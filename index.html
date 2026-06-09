@@ -607,6 +607,26 @@ function fecharImportar() {
   lancamentosImportados = [];
 }
 
+function limparMes(cartaoId, mes, ano) {
+  const nomeMes = MESES[mes - 1];
+  const c = CARTOES.find(x => x.id === cartaoId);
+  const todos = getLancamentos();
+  const aRemover = todos.filter(l => {
+    if (l.cartao !== cartaoId) return false;
+    const d = new Date(l.data + 'T00:00:00');
+    return d.getMonth() + 1 === mes && d.getFullYear() === ano;
+  });
+  if (!aRemover.length) {
+    alert(`Não há lançamentos em ${nomeMes}/${ano} para ${c.nome}.`);
+    return;
+  }
+  if (!confirm(`Remover TODOS os ${aRemover.length} lançamento(s) de ${nomeMes}/${ano} do ${c.nome}?\n\nEssa ação não pode ser desfeita.`)) return;
+  const restantes = todos.filter(l => !aRemover.includes(l));
+  salvarTodos(restantes);
+  renderCartao(cartaoId);
+  alert(`✅ ${aRemover.length} lançamento(s) removido(s).`);
+}
+
 async function lerPDF(input) {
   const file = input.files[0];
   if (!file) return;
@@ -664,17 +684,23 @@ async function lerPDF(input) {
       textoCompleto += '\n';
     }
 
-    // DEBUG
-    const linhasDebug = textoCompleto.split('\n').filter(l => /\d\/[a-zA-Z\d]|R\$/.test(l));
-    console.log('=== LINHAS COM DATA/VALOR ===\n' + linhasDebug.slice(0,30).join('\n'));
-    console.log('RAW total chars:', textoRaw.length);
-    console.log('RAW 0-800:\n' + textoRaw.substring(0,800));
-    console.log('RAW 800-1600:\n' + textoRaw.substring(800,1600));
-    console.log('RAW 1600-2400:\n' + textoRaw.substring(1600,2400));
-
     // Detecta banco pelo conteúdo
     const banco = cartaoImportando === 'bb' || /Banco do Brasil|SALDO FATURA ANTERIOR|Ricieri|Ourocard/i.test(textoCompleto) ? 'bb' : 'unicred';
     const items = banco === 'bb' ? parsearBB(textoCompleto) : parsearUnicred(textoCompleto, textoRaw);
+
+    // Aplica competência da fatura: sobrescreve mês/ano de TODOS os lançamentos
+    // com o mês/ano selecionado no filtro (o que vale é sempre a competência da fatura)
+    const selMesComp = document.getElementById(`filtro-mes-${cartaoImportando}`);
+    const selAnoComp = document.getElementById(`filtro-ano-${cartaoImportando}`);
+    if (selMesComp && selAnoComp) {
+      const mesComp = String(selMesComp.value).padStart(2, '0');
+      const anoComp = selAnoComp.value;
+      items.forEach(it => {
+        const dia = it.data ? it.data.split('-')[2] : '01';
+        it.data = `${anoComp}-${mesComp}-${dia}`;
+        it.competencia = `${anoComp}-${mesComp}`; // campo extra para referência
+      });
+    }
 
     if (!items.length) {
       document.getElementById('imp-conteudo').innerHTML = `
@@ -910,6 +936,7 @@ function renderCartao(id) {
       <select id="filtro-ano-${id}" onchange="renderCartao('${id}')">${opsAno}</select>
       <button class="btn btn-laranja" onclick="abrirImportar('${id}')">📄 Importar PDF da Fatura</button>
       <button class="btn btn-azul" onclick="abrirModal('${id}')">+ Lançamento Manual</button>
+      <button class="btn btn-vermelho" onclick="limparMes('${id}', ${mesSel}, ${anoSel})">🗑 Limpar Mês</button>
     </div>`;
 
   const mes = mesSel;
