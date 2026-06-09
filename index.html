@@ -267,6 +267,7 @@
     <div class="exportar-bar">
       <span>Exportar:</span>
       <button class="btn btn-verde btn-sm" onclick="exportarCSV()">CSV / Excel</button>
+      <button class="btn btn-azul btn-sm" onclick="exportarContabil()">📊 Contábil CSV</button>
       <button class="btn btn-cinza btn-sm" onclick="window.print()">Imprimir / PDF</button>
     </div>
     <div id="content-relatorio"></div>
@@ -317,13 +318,38 @@
 
 <!-- ══ MODAL IMPORTAR PDF ══ -->
 <div class="overlay" id="overlay-categorias">
-  <div class="modal" style="max-width:480px">
+  <div class="modal" style="max-width:600px">
     <h2>⚙ Gerenciar Categorias</h2>
-    <div style="display:flex;gap:8px;margin-bottom:16px">
-      <input id="nova-cat-input" type="text" placeholder="Nova categoria..." style="flex:1;padding:9px 12px;border:1px solid #ccc;border-radius:8px;font-size:.95rem" onkeydown="if(event.key==='Enter')adicionarCategoria()" />
+
+    <div style="margin-bottom:18px;background:#f0f4ff;border-radius:10px;padding:14px">
+      <strong style="display:block;margin-bottom:10px;color:var(--azul)">Contas dos Cartões (conta crédito no lançamento contábil)</strong>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:.85rem;color:#555">Banco do Brasil</label>
+          <input id="cod-cartao-bb" type="text" placeholder="Ex: 1234"
+            style="width:100%;padding:7px 10px;border:1px solid #ccc;border-radius:7px;margin-top:4px;box-sizing:border-box"
+            onchange="salvarCodCartao('bb', this.value)" />
+        </div>
+        <div>
+          <label style="font-size:.85rem;color:#555">Unicred</label>
+          <input id="cod-cartao-unicred" type="text" placeholder="Ex: 5678"
+            style="width:100%;padding:7px 10px;border:1px solid #ccc;border-radius:7px;margin-top:4px;box-sizing:border-box"
+            onchange="salvarCodCartao('unicred', this.value)" />
+        </div>
+      </div>
+    </div>
+
+    <strong style="display:block;margin-bottom:8px;color:var(--azul)">Categorias e Contas de Débito</strong>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="nova-cat-input" type="text" placeholder="Nova categoria..."
+        style="flex:1;padding:9px 12px;border:1px solid #ccc;border-radius:8px;font-size:.95rem"
+        onkeydown="if(event.key==='Enter')adicionarCategoria()" />
       <button class="btn btn-verde" onclick="adicionarCategoria()">+ Adicionar</button>
     </div>
-    <div id="lista-categorias" style="max-height:55vh;overflow-y:auto"></div>
+    <div style="display:grid;grid-template-columns:1fr 140px 40px;gap:0;font-size:.8rem;font-weight:bold;color:#888;padding:4px 10px;border-bottom:1px solid #ddd;margin-bottom:4px">
+      <span>Categoria</span><span style="text-align:center">Cód. Contábil (débito)</span><span></span>
+    </div>
+    <div id="lista-categorias" style="max-height:40vh;overflow-y:auto"></div>
     <div class="modal-btns">
       <button class="btn btn-cinza" onclick="fecharCategorias()">Fechar</button>
     </div>
@@ -396,6 +422,22 @@ function getCategorias() {
 
 function salvarCategorias(lista) {
   localStorage.setItem('categorias_custom', JSON.stringify(lista));
+}
+
+function getCodigosContabeis() {
+  try { return JSON.parse(localStorage.getItem('codigos_contabeis') || '{}'); } catch { return {}; }
+}
+
+function salvarCodigosContabeis(obj) {
+  localStorage.setItem('codigos_contabeis', JSON.stringify(obj));
+}
+
+function getCodigosCartoes() {
+  try { return JSON.parse(localStorage.getItem('codigos_cartoes') || '{}'); } catch { return {}; }
+}
+
+function salvarCodigosCartoes(obj) {
+  localStorage.setItem('codigos_cartoes', JSON.stringify(obj));
 }
 
 // CATEGORIAS é sempre lido via getCategorias() — mantido como alias para compatibilidade
@@ -631,6 +673,10 @@ function abrirImportar(cartaoId) {
 // GERENCIAR CATEGORIAS
 // ══════════════════════════════════════════════════════
 function abrirCategorias() {
+  // Preenche códigos dos cartões
+  const cods = getCodigosCartoes();
+  document.getElementById('cod-cartao-bb').value = cods.bb || '';
+  document.getElementById('cod-cartao-unicred').value = cods.unicred || '';
   renderListaCategorias();
   document.getElementById('overlay-categorias').classList.add('aberto');
   document.getElementById('nova-cat-input').focus();
@@ -640,17 +686,33 @@ function fecharCategorias() {
   document.getElementById('overlay-categorias').classList.remove('aberto');
 }
 
+function salvarCodCartao(cartaoId, valor) {
+  const cods = getCodigosCartoes();
+  cods[cartaoId] = valor.trim();
+  salvarCodigosCartoes(cods);
+}
+
+function salvarCodCategoria(catNome, valor) {
+  const cods = getCodigosContabeis();
+  cods[catNome] = valor.trim();
+  salvarCodigosContabeis(cods);
+}
+
 function renderListaCategorias() {
   const cats = getCategorias();
+  const cods = getCodigosContabeis();
   const lista = document.getElementById('lista-categorias');
   if (!cats.length) {
     lista.innerHTML = '<p style="color:#888;text-align:center;padding:20px">Nenhuma categoria cadastrada.</p>';
     return;
   }
   lista.innerHTML = cats.map((c, i) => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid #eee;gap:8px">
-      <span style="flex:1">${c}</span>
-      ${c === 'Outros' ? '' : `<button class="btn btn-sm btn-vermelho" onclick="removerCategoria(${i})" title="Remover">✕</button>`}
+    <div style="display:grid;grid-template-columns:1fr 140px 40px;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid #eee">
+      <span style="font-size:.93rem">${c}</span>
+      <input type="text" value="${cods[c] || ''}" placeholder="Código"
+        style="padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:.88rem;text-align:center"
+        onchange="salvarCodCategoria('${c.replace(/'/g, "\\'")}', this.value)" />
+      ${c === 'Outros' ? '<span></span>' : `<button class="btn btn-sm btn-vermelho" onclick="removerCategoria(${i})" title="Remover">✕</button>`}
     </div>`).join('');
 }
 
@@ -659,14 +721,9 @@ function adicionarCategoria() {
   const nome = input.value.trim();
   if (!nome) return;
   const cats = getCategorias();
-  if (cats.includes(nome)) {
-    alert('Categoria "' + nome + '" já existe.');
-    return;
-  }
-  // Insere antes de "Outros"
+  if (cats.includes(nome)) { alert('Categoria "' + nome + '" já existe.'); return; }
   const idx = cats.indexOf('Outros');
-  if (idx >= 0) cats.splice(idx, 0, nome);
-  else cats.push(nome);
+  if (idx >= 0) cats.splice(idx, 0, nome); else cats.push(nome);
   salvarCategorias(cats);
   CATEGORIAS = cats;
   input.value = '';
@@ -1272,6 +1329,66 @@ function exportarCSV() {
   const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download='Relatorio_Cartoes_Acelera.csv'; a.click(); URL.revokeObjectURL(url);
+}
+
+function exportarContabil() {
+  if (!dadosRelatorio.length) { alert('Gere o relatório antes de exportar.'); return; }
+
+  const codsContabeis = getCodigosContabeis();
+  const codsCartoes   = getCodigosCartoes();
+
+  const semCodCategoria = [];
+  const semCodCartao    = [];
+  const linhas = [];
+
+  dadosRelatorio.forEach(l => {
+    const codDebito  = codsContabeis[l.categoria] || '';
+    const codCredito = codsCartoes[l.cartao] || '';
+
+    if (!codDebito)  semCodCategoria.push(l.categoria || 'Sem categoria');
+    if (!codCredito) semCodCartao.push(CARTOES.find(c => c.id === l.cartao)?.nome || l.cartao);
+
+    if (!codDebito || !codCredito) return; // pula linhas sem código configurado
+
+    const data = l.data ? new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+    const valor = Number(l.valor || 0).toFixed(2).replace('.', ',');
+    const historico = (l.fornecedor || l.descricao || '').replace(/"/g, '""');
+
+    linhas.push(`"${data}";"${codDebito}";"${codCredito}";"${valor}";"${historico}"`);
+  });
+
+  if (semCodCategoria.length || semCodCartao.length) {
+    const msgs = [];
+    if (semCodCategoria.length) {
+      const unicas = [...new Set(semCodCategoria)];
+      msgs.push(`Categorias sem código contábil (${unicas.length}):\n• ${unicas.join('\n• ')}`);
+    }
+    if (semCodCartao.length) {
+      const unicas = [...new Set(semCodCartao)];
+      msgs.push(`Cartões sem código contábil (${unicas.length}):\n• ${unicas.join('\n• ')}`);
+    }
+    const continuar = confirm(
+      `⚠️ Alguns lançamentos foram ignorados por falta de código contábil:\n\n${msgs.join('\n\n')}\n\n` +
+      `Deseja exportar apenas os ${linhas.length} lançamento(s) com código configurado?\n` +
+      `Configure os códigos em ⚙ Categorias.`
+    );
+    if (!continuar) return;
+  }
+
+  if (!linhas.length) {
+    alert('Nenhum lançamento com código contábil configurado para exportar.\nAcesse ⚙ Categorias para configurar os códigos.');
+    return;
+  }
+
+  const cabecalho = '"Data";"Conta Débito";"Conta Crédito";"Valor";"Histórico"';
+  const csv = '﻿' + [cabecalho, ...linhas].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'Lancamentos_Contabeis_Acelera.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ══════════════════════════════════════════════════════
