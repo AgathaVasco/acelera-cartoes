@@ -438,55 +438,54 @@ function parsearUnicred(texto, textoRaw) {
   const anoAtual = new Date().getFullYear();
   const MESES_PT = { jan:1, fev:2, mar:3, abr:4, mai:5, jun:6, jul:7, ago:8, set:9, out:10, nov:11, dez:12 };
 
-  // Aceita DD/abr ou DD/04 (mês numérico ou abreviado)
-  const RE_LANCAMENTO = /(\d{1,2})\/(([a-zA-Z]{3})|(\d{2}))\s*(.*?)\s*R\$\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
-
-  function extrairDe(textoBase, label) {
+  // Abordagem: localiza cada DD/mmm no texto e corta chunks entre eles
+  // Evita problema do R$ lazy regex engolir texto demais
+  function extrairPorChunks(flat) {
     const lancamentos = [];
-    const flat = textoBase.replace(/\n/g, ' ');
-
-    // Diagnóstico: encontra primeiro padrão de data e R$
-    const dateTest = /\d\/(mar|abr|mai|jan|fev|jun|jul|ago|set|out|nov|dez|\d{2})/i.exec(flat);
-    console.log('[' + (label||'?') + '] data encontrada:', dateTest?.[0]);
-    const rIdx = flat.indexOf('R');
-    // Mostra código do próximo char depois de R (verifica se é $ ou outro símbolo)
-    for (let i = 0; i < flat.length - 1; i++) {
-      if (flat[i] === 'R' && (flat[i+1] === '$' || flat.charCodeAt(i+1) > 127)) {
-        console.log('[' + (label||'?') + '] R seguido de char:', JSON.stringify(flat[i+1]), 'código:', flat.charCodeAt(i+1));
-        break;
-      }
-    }
-
+    const RE_DATA = /(\d{1,2})\/([a-zA-Z]{3})/g;
+    const tokens = [];
     let m;
-    // Tenta R$ normal; se não achar, tenta R seguido de qualquer símbolo de moeda
-    const re = new RegExp(RE_LANCAMENTO.source, 'gi');
-    const reAlt = /(\d{1,2})\/(([a-zA-Z]{3})|(\d{2}))\s*(.*?)\s*R[\$＄＄]?\s*([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))/gi;
-    const reUsar = re;
-    while ((m = reUsar.exec(flat)) !== null) {
-      const dia    = m[1].padStart(2, '0');
-      const mesRaw = m[2].toLowerCase();
-      const desc   = m[5].trim();
-      const valorRaw = m[6].replace(/\./g, '').replace(',', '.');
-      const valor  = parseFloat(valorRaw);
-
-      if (!valor || valor <= 0) continue;
-      if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(desc)) continue;
-      if (/TOTAL|SALDO|FATURA/i.test(desc) && valor > 1000) continue;
-
-      const mesNum = /^\d+$/.test(mesRaw) ? parseInt(mesRaw) : (MESES_PT[mesRaw.substring(0,3)] || (new Date().getMonth() + 1));
-      const dataISO = `${anoAtual}-${String(mesNum).padStart(2,'0')}-${dia}`;
-
-      const parcMatch = desc.match(/Parc[.\s]*(\d+\/\d+)/i);
-      const parcela = parcMatch ? parcMatch[1] : '';
-      const fornecedor = (desc.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || desc).substring(0, 60);
-
-      lancamentos.push({ data: dataISO, fornecedor, descricao: desc || fornecedor, parcela, valor, categoria: sugerirCategoria(desc) });
+    while ((m = RE_DATA.exec(flat)) !== null) {
+      const mes = m[2].toLowerCase().substring(0, 3);
+      if (!MESES_PT[mes]) continue; // ignora se não for mês válido (ex: "2/04" do código de barras)
+      tokens.push({ dia: m[1], mes, start: m.index, contentStart: m.index + m[0].length });
     }
 
-    // Remove duplicatas
+    console.log('Chunks encontrados:', tokens.length, tokens.map(t => t.dia + '/' + t.mes).join(', '));
+
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      const endPos = i + 1 < tokens.length ? tokens[i + 1].start : flat.length;
+      const chunk = flat.substring(t.contentStart, endPos);
+
+      // Extrai o valor: último número no formato X,XX ou X.XXX,XX no chunk
+      const valorMatch = chunk.match(/(\d{1,3}(?:[.,]\d{3})*,\d{2})(?=[^\d]|$)/);
+      if (!valorMatch) continue;
+
+      const valorRaw = valorMatch[1].replace(/\./g, '').replace(',', '.');
+      const valor = parseFloat(valorRaw);
+      if (!valor || valor <= 0) continue;
+
+      // Descrição: tudo antes do valor (removendo "R$" se houver)
+      const amtIdx = chunk.indexOf(valorMatch[1]);
+      const descRaw = chunk.substring(0, amtIdx).replace(/R\$\s*$/, '').trim();
+
+      if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(descRaw)) continue;
+      if (valor > 20000) continue; // provavelmente total da fatura, não lançamento
+
+      const mesNum = MESES_PT[t.mes];
+      const dataISO = `${anoAtual}-${String(mesNum).padStart(2, '0')}-${t.dia.padStart(2, '0')}`;
+
+      const parcMatch = descRaw.match(/Parc[.\s]*(\d+\/\d+)/i);
+      const parcela = parcMatch ? parcMatch[1] : '';
+      const fornecedor = (descRaw.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || descRaw).substring(0, 60);
+
+      lancamentos.push({ data: dataISO, fornecedor, descricao: descRaw || fornecedor, parcela, valor, categoria: sugerirCategoria(descRaw) });
+    }
+
     const vistos = new Set();
     return lancamentos.filter(l => {
-      const chave = `${l.data}-${l.valor}-${l.fornecedor.substring(0,8)}`;
+      const chave = `${l.data}-${l.valor}`;
       if (vistos.has(chave)) return false;
       vistos.add(chave);
       return true;
@@ -494,12 +493,14 @@ function parsearUnicred(texto, textoRaw) {
   }
 
   // Tenta texto normal primeiro; se não achar nada, tenta texto bruto
-  const resultado = extrairDe(texto, 'normal');
+  const flat1 = texto.replace(/\n/g, ' ');
+  const resultado = extrairPorChunks(flat1);
   if (resultado.length > 0) return resultado;
 
   if (textoRaw) {
     console.log('Tentando texto bruto...');
-    return extrairDe(textoRaw, 'raw');
+    const flat2 = textoRaw.replace(/\n/g, ' ');
+    return extrairPorChunks(flat2);
   }
   return [];
 }
