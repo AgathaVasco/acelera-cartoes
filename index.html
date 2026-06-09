@@ -500,7 +500,13 @@ function parsearUnicred(texto, textoRaw) {
   if (textoRaw) {
     console.log('Tentando texto bruto...');
     const flat2 = textoRaw.replace(/\n/g, ' ');
-    return extrairPorChunks(flat2);
+    const r2 = extrairPorChunks(flat2);
+    if (r2.length > 0) return r2;
+
+    // Caracteres espaçados individualmente no PDF ("0 5 / m a r" → "05/mar")
+    console.log('Tentando sem espaços...');
+    const flat3 = textoRaw.replace(/[\n ]/g, '');
+    return extrairPorChunks(flat3);
   }
   return [];
 }
