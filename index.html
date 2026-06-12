@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Controle de Cartões — Acelera Corretora</title>
+  <title>Controle de Cartões de Crédito - Conflex</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     :root {
@@ -208,7 +208,7 @@
 
 <header>
   <div>
-    <h1>Acelera Corretora — Controle de Cartões de Crédito</h1>
+    <h1>Controle de Cartões de Crédito - Conflex</h1>
     <span id="mes-header"></span>
   </div>
 </header>
@@ -217,6 +217,7 @@
   <button class="ativo" onclick="irPara('dashboard', this)">Dashboard</button>
   <button onclick="irPara('bb', this)">Banco do Brasil</button>
   <button onclick="irPara('unicred', this)">Unicred</button>
+  <button onclick="irPara('itau', this)">Itaú P4H</button>
   <button onclick="irPara('conciliacao', this)">Conciliação</button>
   <button onclick="irPara('relatorio', this)">Relatório</button>
   <button onclick="abrirCategorias()" style="margin-left:auto">⚙ Categorias</button>
@@ -243,6 +244,10 @@
 
   <div id="sec-unicred" class="secao">
     <div id="content-unicred"></div>
+  </div>
+
+  <div id="sec-itau" class="secao">
+    <div id="content-itau"></div>
   </div>
 
   <div id="sec-conciliacao" class="secao">
@@ -323,7 +328,7 @@
 
     <div style="margin-bottom:18px;background:#f0f4ff;border-radius:10px;padding:14px">
       <strong style="display:block;margin-bottom:10px;color:var(--azul)">Contas dos Cartões (conta crédito no lançamento contábil)</strong>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div>
           <label style="font-size:.85rem;color:#555">Banco do Brasil</label>
           <input id="cod-cartao-bb" type="text" placeholder="Ex: 1234"
@@ -335,6 +340,12 @@
           <input id="cod-cartao-unicred" type="text" placeholder="Ex: 5678"
             style="width:100%;padding:7px 10px;border:1px solid #ccc;border-radius:7px;margin-top:4px;box-sizing:border-box"
             onchange="salvarCodCartao('unicred', this.value)" />
+        </div>
+        <div>
+          <label style="font-size:.85rem;color:#555">Itaú P4H</label>
+          <input id="cod-cartao-itau" type="text" placeholder="Ex: 6598"
+            style="width:100%;padding:7px 10px;border:1px solid #ccc;border-radius:7px;margin-top:4px;box-sizing:border-box"
+            onchange="salvarCodCartao('itau', this.value)" />
         </div>
       </div>
     </div>
@@ -392,6 +403,7 @@ if (typeof pdfjsLib !== 'undefined') {
 const CARTOES = [
   { id: 'bb',      nome: 'Banco do Brasil' },
   { id: 'unicred', nome: 'Unicred'         },
+  { id: 'itau',    nome: 'Itaú P4H'        },
 ];
 
 const CATEGORIAS_PADRAO = [
@@ -579,6 +591,77 @@ function parsearUnicred(texto, textoRaw) {
 }
 
 // ══════════════════════════════════════════════════════
+// PARSER ITAÚ P4H
+// ══════════════════════════════════════════════════════
+function parsearItau(texto) {
+  const lancamentos = [];
+  const anoAtual = new Date().getFullYear();
+  const linhas = texto.split('\n').map(l => l.trim());
+
+  // Linha de lançamento: DD/MM ESTABELECIMENTO ... VALOR (ex: "09/04 MERCADOLIVRE*SIENO 531,25")
+  const RE_LINHA = /^(\d{2})\/(\d{2})\s+(.+?)\s+(-?\s?\d{1,3}(?:\.\d{3})*,\d{2})$/;
+  // Portador: "RENATO CISZ (final 7237)"
+  const RE_PORTADOR = /^(.+?)\s*\(final\s*\d{4}\)/i;
+
+  let portadorAtual = '';
+
+  for (let i = 0; i < linhas.length; i++) {
+    const linha = linhas[i];
+    if (!linha) continue;
+
+    const mp = linha.match(RE_PORTADOR);
+    if (mp && !/Lançamentos no cartão/i.test(linha)) {
+      portadorAtual = mp[1].trim();
+      continue;
+    }
+
+    const m = linha.match(RE_LINHA);
+    if (!m) continue;
+
+    const desc = m[3].trim();
+    if (/PAGAMENTO EFETUADO|Total d|Dólar de Convers/i.test(desc)) continue;
+
+    const valor = parseFloat(m[4].replace(/\s/g, '').replace(/\./g, '').replace(',', '.'));
+    if (!valor) continue;
+
+    // A linha seguinte costuma trazer a categoria do Itaú (ex: "ALIMENTAÇÃO .FLORIANOPOLIS")
+    const linhaCat = linhas[i + 1] || '';
+    const catHint = linhaCat.includes('.') ? linhaCat.split('.')[0].trim() : '';
+
+    const mes = parseInt(m[2]);
+    const dataISO = `${anoAtual}-${String(mes).padStart(2, '0')}-${m[1]}`;
+
+    const parcMatch = desc.match(/(\d{2})\/(\d{2})$/);
+    const parcela = parcMatch && parseInt(parcMatch[2]) <= 12 && parseInt(parcMatch[1]) <= parseInt(parcMatch[2])
+      ? `${parseInt(parcMatch[1])}/${parseInt(parcMatch[2])}` : '';
+
+    // Mapeia a categoria que o próprio Itaú informa na linha de baixo
+    const MAPA_ITAU = {
+      'ALIMENTAÇÃO': 'Alimentação / Refeições', 'ALIMENTACAO': 'Alimentação / Refeições',
+      'VEÍCULOS': 'Combustível', 'VEICULOS': 'Combustível',
+      'EDUCAÇÃO': 'Treinamento / Capacitação', 'EDUCACAO': 'Treinamento / Capacitação',
+      'SAÚDE': 'Outros', 'SAUDE': 'Outros',
+      'TURISMO E ENTRETENIM': 'Hospedagem / Hotel',
+      'VESTUÁRIO': 'Outros', 'VESTUARIO': 'Outros',
+      'MORADIA': 'Outros',
+    };
+    const catItau = MAPA_ITAU[catHint.toUpperCase()] || '';
+
+    lancamentos.push({
+      data: dataISO,
+      fornecedor: desc.substring(0, 60),
+      descricao: desc,
+      parcela,
+      valor,
+      responsavel: portadorAtual,
+      categoria: sugerirCategoria(desc) || catItau,
+    });
+  }
+
+  return lancamentos;
+}
+
+// ══════════════════════════════════════════════════════
 // PARSER BANCO DO BRASIL
 // ══════════════════════════════════════════════════════
 function parsearBB(texto) {
@@ -677,6 +760,7 @@ function abrirCategorias() {
   const cods = getCodigosCartoes();
   document.getElementById('cod-cartao-bb').value = cods.bb || '';
   document.getElementById('cod-cartao-unicred').value = cods.unicred || '';
+  document.getElementById('cod-cartao-itau').value = cods.itau || '';
   renderListaCategorias();
   document.getElementById('overlay-categorias').classList.add('aberto');
   document.getElementById('nova-cat-input').focus();
@@ -823,9 +907,17 @@ async function lerPDF(input) {
       textoCompleto += '\n';
     }
 
-    // Detecta banco pelo conteúdo
-    const banco = cartaoImportando === 'bb' || /Banco do Brasil|SALDO FATURA ANTERIOR|Ricieri|Ourocard/i.test(textoCompleto) ? 'bb' : 'unicred';
-    const items = banco === 'bb' ? parsearBB(textoCompleto) : parsearUnicred(textoCompleto, textoRaw);
+    // Usa o cartão da aba em que o usuário clicou Importar
+    let banco = cartaoImportando;
+    if (!banco) {
+      // Fallback: detecta pelo conteúdo
+      if (/Itau|Itaú|Fatura Corporate/i.test(textoCompleto)) banco = 'itau';
+      else if (/Banco do Brasil|SALDO FATURA ANTERIOR|Ourocard/i.test(textoCompleto)) banco = 'bb';
+      else banco = 'unicred';
+    }
+    const items = banco === 'bb'   ? parsearBB(textoCompleto)
+                : banco === 'itau' ? parsearItau(textoCompleto)
+                : parsearUnicred(textoCompleto, textoRaw);
 
     // Aplica competência da fatura: sobrescreve mês/ano de TODOS os lançamentos
     // com o mês/ano selecionado no filtro (o que vale é sempre a competência da fatura)
@@ -981,6 +1073,7 @@ function irPara(sec, btn) {
   if (sec === 'dashboard')   renderDashboard();
   if (sec === 'bb')          renderCartao('bb');
   if (sec === 'unicred')     renderCartao('unicred');
+  if (sec === 'itau')        renderCartao('itau');
   if (sec === 'conciliacao') renderConciliacao();
   if (sec === 'relatorio')   renderRelatorio();
 }
@@ -1394,6 +1487,12 @@ function exportarContabil() {
 // ══════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════
+// Código contábil padrão do Itaú P4H (informado pela contabilidade)
+(function() {
+  const cods = getCodigosCartoes();
+  if (!cods.itau) { cods.itau = '6598'; salvarCodigosCartoes(cods); }
+})();
+
 popularSelects();
 renderDashboard();
 </script>
