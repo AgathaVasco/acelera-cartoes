@@ -598,8 +598,10 @@ function parsearItau(texto) {
   const anoAtual = new Date().getFullYear();
   const linhas = texto.split('\n').map(l => l.trim());
 
-  // Linha de lançamento: DD/MM ESTABELECIMENTO ... VALOR (ex: "09/04 MERCADOLIVRE*SIENO 531,25")
-  const RE_LINHA = /^(\d{2})\/(\d{2})\s+(.+?)\s+(-?\s?\d{1,3}(?:\.\d{3})*,\d{2})$/;
+  // A fatura tem DUAS COLUNAS lado a lado — as linhas extraídas podem misturar
+  // as colunas, com o valor no MEIO da linha (não só no final).
+  // Captura: DD/MM DESCRIÇÃO VALOR em qualquer posição, podendo haver mais de um por linha.
+  const RE_LINHA = /(\d{2})\/(\d{2})\s+(.+?)\s*(-?\s?\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.\/])/g;
   // Portador: "RENATO CISZ (final 7237)"
   const RE_PORTADOR = /^(.+?)\s*\(final\s*\d{4}\)/i;
 
@@ -615,18 +617,26 @@ function parsearItau(texto) {
       continue;
     }
 
-    const m = linha.match(RE_LINHA);
-    if (!m) continue;
+    const re = new RegExp(RE_LINHA.source, 'g');
+    let m;
+    while ((m = re.exec(linha)) !== null) {
 
     const desc = m[3].trim();
     if (/PAGAMENTO EFETUADO|Total d|Dólar de Convers/i.test(desc)) continue;
+    // Descarta "descrições" que são na verdade datas de parcela soltas (ex: "01/03")
+    if (!desc || /^\.?\s*$/.test(desc)) continue;
 
     const valor = parseFloat(m[4].replace(/\s/g, '').replace(/\./g, '').replace(',', '.'));
     if (!valor) continue;
 
-    // A linha seguinte costuma trazer a categoria do Itaú (ex: "ALIMENTAÇÃO .FLORIANOPOLIS")
-    const linhaCat = linhas[i + 1] || '';
-    const catHint = linhaCat.includes('.') ? linhaCat.split('.')[0].trim() : '';
+    // Categoria do Itaú: pode estar no resto da linha (colunas misturadas) ou na linha seguinte
+    const resto = linha.substring(m.index + m[0].length);
+    let catHint = '';
+    if (resto.includes('.')) catHint = resto.split('.')[0].trim();
+    else {
+      const linhaCat = linhas[i + 1] || '';
+      if (linhaCat.includes('.')) catHint = linhaCat.split('.')[0].trim();
+    }
 
     const mes = parseInt(m[2]);
     const dataISO = `${anoAtual}-${String(mes).padStart(2, '0')}-${m[1]}`;
@@ -656,6 +666,24 @@ function parsearItau(texto) {
       responsavel: portadorAtual,
       categoria: sugerirCategoria(desc) || catItau,
     });
+    } // fim while (vários lançamentos por linha)
+  }
+
+  // Repasse de IOF dos lançamentos internacionais (sem data própria na fatura)
+  const iofMatch = texto.match(/Repasse de IOF em R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})/i);
+  if (iofMatch) {
+    const valorIof = parseFloat(iofMatch[1].replace(/\./g, '').replace(',', '.'));
+    if (valorIof > 0) {
+      lancamentos.push({
+        data: `${anoAtual}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`,
+        fornecedor: 'Repasse de IOF',
+        descricao: 'Repasse de IOF — lançamentos internacionais',
+        parcela: '',
+        valor: valorIof,
+        responsavel: '',
+        categoria: 'Impostos e Taxas',
+      });
+    }
   }
 
   return lancamentos;
@@ -865,7 +893,8 @@ async function lerPDF(input) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let textoCompleto = '';
-    let textoRaw = ''; // texto bruto concatenado sem agrupamento (fallback)
+    let textoRaw = '';     // texto bruto concatenado sem agrupamento (fallback Unicred)
+    let textoColunas = ''; // texto com colunas esquerda/direita separadas (Itaú tem 2 colunas)
 
     function montarLinha(itens) {
       if (!itens.length) return '';
@@ -877,6 +906,24 @@ async function lerPDF(input) {
         resultado += (gap > 2 ? ' ' : '') + cur.txt;
       }
       return resultado.trim();
+    }
+
+    function agruparLinhas(itens) {
+      let saida = '';
+      let grupo = [], yAtual = null;
+      for (const it of itens) {
+        if (yAtual === null || Math.abs(it.y - yAtual) < 4) {
+          grupo.push(it);
+          yAtual = it.y;
+        } else {
+          const linha = montarLinha(grupo);
+          if (linha) saida += linha + '\n';
+          grupo = [it];
+          yAtual = it.y;
+        }
+      }
+      if (grupo.length) saida += montarLinha(grupo) + '\n';
+      return saida;
     }
 
     for (let p = 1; p <= pdf.numPages; p++) {
@@ -891,20 +938,11 @@ async function lerPDF(input) {
       textoRaw += '\n';
 
       itens.sort((a, b) => b.y - a.y || a.x - b.x);
-      let grupo = [], yAtual = null;
-      for (const it of itens) {
-        if (yAtual === null || Math.abs(it.y - yAtual) < 4) {
-          grupo.push(it);
-          yAtual = it.y;
-        } else {
-          const linha = montarLinha(grupo);
-          if (linha) textoCompleto += linha + '\n';
-          grupo = [it];
-          yAtual = it.y;
-        }
-      }
-      if (grupo.length) textoCompleto += montarLinha(grupo) + '\n';
-      textoCompleto += '\n';
+      textoCompleto += agruparLinhas(itens) + '\n';
+
+      // Colunas separadas: esquerda (x < 340) e direita (x >= 340)
+      textoColunas += agruparLinhas(itens.filter(it => it.x < 340)) + '\n';
+      textoColunas += agruparLinhas(itens.filter(it => it.x >= 340)) + '\n';
     }
 
     // Usa o cartão da aba em que o usuário clicou Importar
@@ -916,7 +954,7 @@ async function lerPDF(input) {
       else banco = 'unicred';
     }
     const items = banco === 'bb'   ? parsearBB(textoCompleto)
-                : banco === 'itau' ? parsearItau(textoCompleto)
+                : banco === 'itau' ? parsearItau(textoColunas)
                 : parsearUnicred(textoCompleto, textoRaw);
 
     // Aplica competência da fatura: sobrescreve mês/ano de TODOS os lançamentos
