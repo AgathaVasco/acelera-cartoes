@@ -321,6 +321,23 @@
 </main>
 
 <!-- ══ MODAL LANÇAMENTO MANUAL ══ -->
+<div class="overlay" id="overlay-anexos">
+  <div class="modal" style="max-width:520px">
+    <h2>📎 Notas e Comprovantes</h2>
+    <p id="anexos-sub" style="color:var(--muted);font-size:.88rem;margin:4px 0 16px"></p>
+    <div style="border:2px dashed var(--cinza-b);border-radius:12px;padding:18px;text-align:center;margin-bottom:16px">
+      <input type="file" id="anexos-input" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style="display:none" onchange="enviarAnexo(this)" />
+      <button class="btn btn-azul" onclick="document.getElementById('anexos-input').click()">⬆ Enviar arquivo (PDF ou imagem)</button>
+      <p style="color:var(--muted);font-size:.8rem;margin-top:8px">Você pode selecionar vários de uma vez</p>
+      <p id="anexos-progresso" style="color:var(--azul-meio);font-size:.85rem;margin-top:8px"></p>
+    </div>
+    <div id="anexos-lista"></div>
+    <div class="modal-btns">
+      <button class="btn btn-cinza" onclick="fecharAnexos()">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-lancamento">
   <div class="modal">
     <h2 id="modal-titulo">Novo Lançamento</h2>
@@ -482,14 +499,16 @@ function toRow(l) {
     cnpj:l.cnpj||null, nf:l.nf||null, serie:l.serie||null, data_nf:l.dataNf||null,
     descricao:l.descricao||null, categoria:l.categoria||null, cc:l.cc||null,
     responsavel:l.responsavel||null, valor:Number(l.valor)||0, parcela:l.parcela||null,
-    status:l.status||'Pendente', obs:l.obs||null, competencia:l.competencia||null };
+    status:l.status||'Pendente', obs:l.obs||null, competencia:l.competencia||null,
+    anexos: Array.isArray(l.anexos) ? l.anexos : [] };
 }
 function fromRow(r) {
   return { id:r.id, cartao:r.cartao||'', data:r.data||'', fornecedor:r.fornecedor||'',
     cnpj:r.cnpj||'', nf:r.nf||'', serie:r.serie||'', dataNf:r.data_nf||'',
     descricao:r.descricao||'', categoria:r.categoria||'', cc:r.cc||'',
     responsavel:r.responsavel||'', valor:Number(r.valor)||0, parcela:r.parcela||'',
-    status:r.status||'Pendente', obs:r.obs||'', competencia:r.competencia||'' };
+    status:r.status||'Pendente', obs:r.obs||'', competencia:r.competencia||'',
+    anexos: Array.isArray(r.anexos) ? r.anexos : [] };
 }
 
 async function salvarConfig(chave, valor) {
@@ -1362,6 +1381,7 @@ function renderCartao(id) {
             <td>${l.parcela||'-'}</td>
             <td>${badge(l.status)}</td>
             <td>
+              <button class="btn btn-azul btn-sm" onclick="abrirAnexos('${l.id}')" title="Notas / comprovantes">📎${(l.anexos&&l.anexos.length)?' '+l.anexos.length:''}</button>
               <button class="btn btn-cinza btn-sm" onclick="editarLancamento('${l.id}')">Editar</button>
               <button class="btn btn-vermelho btn-sm" onclick="excluirLancamento('${l.id}')">Excluir</button>
             </td>
@@ -1420,6 +1440,95 @@ function abrirModal(cartaoId, id) {
 }
 
 function fecharModal() { document.getElementById('overlay-lancamento').classList.remove('aberto'); editandoId = null; }
+
+// ══════════════════════════════════════════════════════
+// ANEXOS (notas fiscais / comprovantes)
+// ══════════════════════════════════════════════════════
+let anexoLancId = null;
+
+function abrirAnexos(id) {
+  anexoLancId = id;
+  const l = getLancamentos().find(x => x.id === id);
+  document.getElementById('anexos-sub').textContent = l
+    ? `${l.fornecedor || 'Lançamento'} · ${fmt(l.valor)} · ${l.data ? new Date(l.data+'T00:00:00').toLocaleDateString('pt-BR') : ''}` : '';
+  document.getElementById('anexos-progresso').textContent = '';
+  document.getElementById('anexos-input').value = '';
+  renderListaAnexos();
+  document.getElementById('overlay-anexos').classList.add('aberto');
+}
+
+function fecharAnexos() {
+  document.getElementById('overlay-anexos').classList.remove('aberto');
+  anexoLancId = null;
+}
+
+function renderListaAnexos() {
+  const l = getLancamentos().find(x => x.id === anexoLancId);
+  const cont = document.getElementById('anexos-lista');
+  const anexos = (l && l.anexos) || [];
+  if (!anexos.length) { cont.innerHTML = '<p style="color:#888;text-align:center;padding:14px">Nenhum anexo ainda.</p>'; return; }
+  cont.innerHTML = anexos.map((a, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--cinza-b);border-radius:9px;margin-bottom:8px">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${a.nome}</span>
+      <button class="btn btn-azul btn-sm" onclick="verAnexo('${a.path.replace(/'/g, "\\'")}')">Ver / Baixar</button>
+      <button class="btn btn-vermelho btn-sm" onclick="excluirAnexo(${i})" title="Excluir">✕</button>
+    </div>`).join('');
+}
+
+async function enviarAnexo(input) {
+  const files = [...input.files];
+  if (!files.length || !anexoLancId) return;
+  const prog = document.getElementById('anexos-progresso');
+  const l = getLancamentos().find(x => x.id === anexoLancId);
+  const anexos = (l.anexos || []).slice();
+  try {
+    for (let k = 0; k < files.length; k++) {
+      const file = files[k];
+      prog.textContent = `Enviando ${k+1}/${files.length}: ${file.name}...`;
+      const safe = file.name.replace(/[^\w.\-]+/g, '_');
+      const path = `${anexoLancId}/${crypto.randomUUID()}_${safe}`;
+      const { error } = await sb.storage.from('comprovantes').upload(path, file);
+      if (error) throw error;
+      anexos.push({ nome: file.name, path });
+    }
+    const lista = getLancamentos();
+    const idx = lista.findIndex(x => x.id === anexoLancId);
+    lista[idx] = { ...lista[idx], anexos };
+    await salvarTodos(lista);
+    prog.textContent = '✅ Enviado com sucesso!';
+    input.value = '';
+    renderListaAnexos();
+    renderCartao(lista[idx].cartao);
+  } catch (e) {
+    prog.textContent = '';
+    alert('Erro ao enviar anexo: ' + (e.message || e));
+  }
+}
+
+async function verAnexo(path) {
+  try {
+    const { data, error } = await sb.storage.from('comprovantes').createSignedUrl(path, 3600);
+    if (error) throw error;
+    window.open(data.signedUrl, '_blank');
+  } catch (e) { alert('Erro ao abrir o anexo: ' + (e.message || e)); }
+}
+
+async function excluirAnexo(i) {
+  const lista = getLancamentos();
+  const idx = lista.findIndex(x => x.id === anexoLancId);
+  const anexos = (lista[idx].anexos || []).slice();
+  const alvo = anexos[i];
+  if (!alvo) return;
+  if (!confirm(`Excluir o anexo "${alvo.nome}"?`)) return;
+  try {
+    await sb.storage.from('comprovantes').remove([alvo.path]);
+    anexos.splice(i, 1);
+    lista[idx] = { ...lista[idx], anexos };
+    await salvarTodos(lista);
+    renderListaAnexos();
+    renderCartao(lista[idx].cartao);
+  } catch (e) { alert('Erro ao excluir o anexo: ' + (e.message || e)); }
+}
 
 function salvarLancamento() {
   const valor = parseFloat(document.getElementById('f-valor').value);
