@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Controle de Cartões de Crédito - Conflex</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
       --azul:       #1F3864;
@@ -206,11 +207,27 @@
 </head>
 <body>
 
+<div id="login-overlay" style="position:fixed;inset:0;background:var(--azul);display:flex;align-items:center;justify-content:center;z-index:9999">
+  <div style="background:#fff;padding:34px 30px;border-radius:14px;box-shadow:0 8px 30px #0004;width:340px;max-width:90vw">
+    <h2 style="margin:0 0 4px;color:var(--azul);font-size:1.25rem">Controle de Cartões</h2>
+    <p style="margin:0 0 18px;color:#777;font-size:.9rem">Conflex — entre com seu e-mail e senha</p>
+    <input id="login-email" type="email" placeholder="E-mail" autocomplete="username"
+      style="width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:8px;margin-bottom:10px;box-sizing:border-box;font-size:.95rem" />
+    <input id="login-senha" type="password" placeholder="Senha" autocomplete="current-password"
+      onkeydown="if(event.key==='Enter')fazerLogin()"
+      style="width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:8px;margin-bottom:14px;box-sizing:border-box;font-size:.95rem" />
+    <button onclick="fazerLogin()" id="login-btn"
+      style="width:100%;padding:12px;background:var(--azul-meio);color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer">Entrar</button>
+    <p id="login-erro" style="color:#c0392b;font-size:.85rem;margin:12px 0 0;min-height:1em"></p>
+  </div>
+</div>
+
 <header>
   <div>
     <h1>Controle de Cartões de Crédito - Conflex</h1>
     <span id="mes-header"></span>
   </div>
+  <button onclick="fazerLogout()" title="Sair" style="background:#ffffff22;color:#fff;border:1px solid #ffffff55;border-radius:7px;padding:7px 14px;cursor:pointer;font-size:.85rem">Sair</button>
 </header>
 
 <nav>
@@ -425,32 +442,44 @@ const CATEGORIAS_PADRAO = [
   'Outros',
 ];
 
-function getCategorias() {
-  try {
-    const salvas = JSON.parse(localStorage.getItem('categorias_custom') || 'null');
-    return salvas || CATEGORIAS_PADRAO;
-  } catch { return CATEGORIAS_PADRAO; }
+// ══════════════════════════════════════════════════════
+// SUPABASE — banco de dados na nuvem
+// ══════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://komqnfjjkjfhqsftsavf.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtvbXFuZmpqa2pmaHFzZnRzYXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MTM0OTMsImV4cCI6MjA5NzE4OTQ5M30.ji8dlUH3HtzEY0T0D-1zlU150AnSoRSFDz-ufRkZ4DY';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// Cache em memória (mantém o app síncrono; sincroniza com a nuvem em segundo plano)
+let _lanc = [];
+let _cfg  = {};
+
+// Mapeamento entre o objeto do app e a linha da tabela
+function toRow(l) {
+  return { id:l.id, cartao:l.cartao||null, data:l.data||null, fornecedor:l.fornecedor||null,
+    cnpj:l.cnpj||null, nf:l.nf||null, serie:l.serie||null, data_nf:l.dataNf||null,
+    descricao:l.descricao||null, categoria:l.categoria||null, cc:l.cc||null,
+    responsavel:l.responsavel||null, valor:Number(l.valor)||0, parcela:l.parcela||null,
+    status:l.status||'Pendente', obs:l.obs||null, competencia:l.competencia||null };
+}
+function fromRow(r) {
+  return { id:r.id, cartao:r.cartao||'', data:r.data||'', fornecedor:r.fornecedor||'',
+    cnpj:r.cnpj||'', nf:r.nf||'', serie:r.serie||'', dataNf:r.data_nf||'',
+    descricao:r.descricao||'', categoria:r.categoria||'', cc:r.cc||'',
+    responsavel:r.responsavel||'', valor:Number(r.valor)||0, parcela:r.parcela||'',
+    status:r.status||'Pendente', obs:r.obs||'', competencia:r.competencia||'' };
 }
 
-function salvarCategorias(lista) {
-  localStorage.setItem('categorias_custom', JSON.stringify(lista));
+async function salvarConfig(chave, valor) {
+  try { await sb.from('config').upsert({ chave, valor }); }
+  catch (e) { console.error('Erro ao salvar config:', e); }
 }
 
-function getCodigosContabeis() {
-  try { return JSON.parse(localStorage.getItem('codigos_contabeis') || '{}'); } catch { return {}; }
-}
-
-function salvarCodigosContabeis(obj) {
-  localStorage.setItem('codigos_contabeis', JSON.stringify(obj));
-}
-
-function getCodigosCartoes() {
-  try { return JSON.parse(localStorage.getItem('codigos_cartoes') || '{}'); } catch { return {}; }
-}
-
-function salvarCodigosCartoes(obj) {
-  localStorage.setItem('codigos_cartoes', JSON.stringify(obj));
-}
+function getCategorias() { return _cfg.categorias_custom || CATEGORIAS_PADRAO; }
+function salvarCategorias(lista) { _cfg.categorias_custom = lista; salvarConfig('categorias_custom', lista); }
+function getCodigosContabeis() { return _cfg.codigos_contabeis || {}; }
+function salvarCodigosContabeis(obj) { _cfg.codigos_contabeis = obj; salvarConfig('codigos_contabeis', obj); }
+function getCodigosCartoes() { return _cfg.codigos_cartoes || {}; }
+function salvarCodigosCartoes(obj) { _cfg.codigos_cartoes = obj; salvarConfig('codigos_cartoes', obj); }
 
 // CATEGORIAS é sempre lido via getCategorias() — mantido como alias para compatibilidade
 let CATEGORIAS = getCategorias();
@@ -471,8 +500,56 @@ function preencherSelects() {
 }
 preencherSelects();
 
-function getLancamentos() { return JSON.parse(localStorage.getItem('acelera_lancamentos') || '[]'); }
-function salvarTodos(lista) { localStorage.setItem('acelera_lancamentos', JSON.stringify(lista)); }
+function getLancamentos() { return _lanc.map(x => ({ ...x })); }
+
+async function salvarTodos(lista) {
+  const old = _lanc;
+  _lanc = lista.map(x => ({ ...x }));           // atualiza cache na hora (app continua síncrono)
+  try {
+    const newIds = new Set(lista.map(l => l.id));
+    const toDelete = old.filter(l => !newIds.has(l.id)).map(l => l.id);
+    const oldJson = Object.fromEntries(old.map(l => [l.id, JSON.stringify(l)]));
+    const toUpsert = lista.filter(l => oldJson[l.id] !== JSON.stringify(l));
+    if (toUpsert.length) { const { error } = await sb.from('lancamentos').upsert(toUpsert.map(toRow)); if (error) throw error; }
+    if (toDelete.length) { const { error } = await sb.from('lancamentos').delete().in('id', toDelete); if (error) throw error; }
+  } catch (e) {
+    console.error('Erro ao salvar na nuvem:', e);
+    alert('⚠️ Erro ao salvar na nuvem: ' + (e.message || e) + '\nVerifique sua conexão e tente novamente.');
+  }
+}
+
+// Carrega todos os dados da nuvem para o cache (chamado após o login)
+async function carregarTudo() {
+  const { data: lancs, error: e1 } = await sb.from('lancamentos').select('*');
+  if (e1) throw e1;
+  _lanc = (lancs || []).map(fromRow);
+  const { data: cfgs, error: e2 } = await sb.from('config').select('*');
+  if (e2) throw e2;
+  _cfg = {};
+  (cfgs || []).forEach(c => { _cfg[c.chave] = c.valor; });
+  await migrarLocalStorage();
+  CATEGORIAS = getCategorias();
+}
+
+// Migração única: se a nuvem estiver vazia e houver dados antigos no navegador, sobe pra nuvem
+async function migrarLocalStorage() {
+  try {
+    const locais = JSON.parse(localStorage.getItem('acelera_lancamentos') || '[]');
+    if (_lanc.length === 0 && locais.length > 0) {
+      const ehUuid = s => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+      const comId = locais.map(l => ({ ...l, id: ehUuid(l.id) ? l.id : crypto.randomUUID() }));
+      const { error } = await sb.from('lancamentos').insert(comId.map(toRow));
+      if (!error) { _lanc = comId; console.log('Migrados', comId.length, 'lançamentos para a nuvem.'); }
+    }
+    const migrarCfg = async (chaveLocal, chaveCfg) => {
+      const v = localStorage.getItem(chaveLocal);
+      if (v && _cfg[chaveCfg] === undefined) { _cfg[chaveCfg] = JSON.parse(v); await salvarConfig(chaveCfg, _cfg[chaveCfg]); }
+    };
+    await migrarCfg('categorias_custom', 'categorias_custom');
+    await migrarCfg('codigos_contabeis', 'codigos_contabeis');
+    await migrarCfg('codigos_cartoes', 'codigos_cartoes');
+  } catch (e) { console.error('Erro na migração:', e); }
+}
 
 // ══════════════════════════════════════════════════════
 // SUGESTÃO DE CATEGORIA POR PALAVRA-CHAVE
@@ -1075,7 +1152,7 @@ function confirmarImportacao() {
   checados.forEach(i => {
     const item = lancamentosImportados[i];
     lista.push({
-      id:          Date.now().toString() + Math.random().toString(36).slice(2),
+      id:          crypto.randomUUID(),
       cartao:      cartaoImportando,
       data:        item.data || '',
       fornecedor:  item.fornecedor || '',
@@ -1331,7 +1408,7 @@ function salvarLancamento() {
 
   const lista = getLancamentos();
   const novo = {
-    id: editandoId || Date.now().toString(),
+    id: editandoId || crypto.randomUUID(),
     cartao: cartaoAtual,
     data: document.getElementById('f-data').value,
     fornecedor: document.getElementById('f-fornecedor').value.trim(),
@@ -1525,14 +1602,47 @@ function exportarContabil() {
 // ══════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════
-// Código contábil padrão do Itaú P4H (informado pela contabilidade)
-(function() {
+// ── LOGIN / AUTENTICAÇÃO ──
+async function fazerLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const senha = document.getElementById('login-senha').value;
+  const erro  = document.getElementById('login-erro');
+  const btn   = document.getElementById('login-btn');
+  erro.textContent = '';
+  if (!email || !senha) { erro.textContent = 'Preencha e-mail e senha.'; return; }
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  const { error } = await sb.auth.signInWithPassword({ email, password: senha });
+  btn.disabled = false; btn.textContent = 'Entrar';
+  if (error) { erro.textContent = 'E-mail ou senha incorretos.'; return; }
+  await iniciarApp();
+}
+
+async function fazerLogout() {
+  await sb.auth.signOut();
+  location.reload();
+}
+
+async function iniciarApp() {
+  try {
+    await carregarTudo();
+  } catch (e) {
+    document.getElementById('login-erro').textContent = 'Erro ao carregar dados: ' + (e.message || e);
+    return;
+  }
+  document.getElementById('login-overlay').style.display = 'none';
+  // Código contábil padrão do Itaú P4H (informado pela contabilidade)
   const cods = getCodigosCartoes();
   if (!cods.itau) { cods.itau = '6598'; salvarCodigosCartoes(cods); }
-})();
+  preencherSelects();
+  popularSelects();
+  renderDashboard();
+}
 
-popularSelects();
-renderDashboard();
+// Se já houver sessão ativa, entra direto; senão, mostra a tela de login
+(async function() {
+  const { data } = await sb.auth.getSession();
+  if (data && data.session) await iniciarApp();
+})();
 </script>
 </body>
 </html>
