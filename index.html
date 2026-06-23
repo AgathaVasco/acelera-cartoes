@@ -257,9 +257,9 @@
 
 <nav>
   <button class="ativo" onclick="irPara('dashboard', this)">Dashboard</button>
-  <button onclick="irPara('bb', this)">Banco do Brasil</button>
-  <button onclick="irPara('unicred', this)">Unicred</button>
-  <button onclick="irPara('itau', this)">Itaú P4H</button>
+  <button id="nav-bb" onclick="irPara('bb', this)">Banco do Brasil</button>
+  <button id="nav-unicred" onclick="irPara('unicred', this)">Unicred</button>
+  <button id="nav-itau" onclick="irPara('itau', this)">Itaú P4H</button>
   <button onclick="irPara('conciliacao', this)">Conciliação</button>
   <button onclick="irPara('relatorio', this)">Relatório</button>
   <button onclick="abrirCategorias()" style="margin-left:auto">⚙ Categorias</button>
@@ -460,10 +460,16 @@ if (typeof pdfjsLib !== 'undefined') {
 // DADOS
 // ══════════════════════════════════════════════════════
 const CARTOES = [
-  { id: 'bb',      nome: 'Banco do Brasil' },
-  { id: 'unicred', nome: 'Unicred'         },
-  { id: 'itau',    nome: 'Itaú P4H'        },
+  { id: 'bb',      nome: 'Banco do Brasil', empresa: 'Acelera Corretora' },
+  { id: 'unicred', nome: 'Unicred',         empresa: 'Acelera Corretora' },
+  { id: 'itau',    nome: 'Itaú P4H',        empresa: 'P4H Saúde'         },
 ];
+
+// Empresas que o usuário logado pode acessar. Vazio = vê todas (admin/padrão).
+let EMPRESAS_PERMITIDAS = [];
+function empresaPermitida(emp) { return EMPRESAS_PERMITIDAS.length === 0 || EMPRESAS_PERMITIDAS.includes(emp); }
+function cartaoPermitido(id) { const c = CARTOES.find(x => x.id === id); return c ? empresaPermitida(c.empresa) : false; }
+function cartoesPermitidos() { return CARTOES.filter(c => empresaPermitida(c.empresa)); }
 
 const CATEGORIAS_PADRAO = [
   'Alimentação / Refeições',
@@ -573,6 +579,33 @@ async function carregarTudo() {
   (cfgs || []).forEach(c => { _cfg[c.chave] = c.valor; });
   await migrarLocalStorage();
   CATEGORIAS = getCategorias();
+  await carregarAcessos();
+}
+
+// Lê as empresas que o usuário logado pode acessar (tabela "acessos" no Supabase)
+async function carregarAcessos() {
+  EMPRESAS_PERMITIDAS = [];
+  try {
+    const { data: u } = await sb.auth.getUser();
+    const email = (u && u.user && u.user.email || '').toLowerCase();
+    const { data, error } = await sb.from('acessos').select('empresa');
+    if (error) return; // tabela ainda não existe ou sem acesso → vê todas
+    const empresas = (data || []).map(r => String(r.empresa || '').trim());
+    // Se o usuário tem 'Todas' ou nenhuma linha, vê todas. Senão, só as listadas.
+    if (empresas.length === 0 || empresas.some(e => e.toLowerCase() === 'todas')) {
+      EMPRESAS_PERMITIDAS = [];
+    } else {
+      EMPRESAS_PERMITIDAS = empresas;
+    }
+  } catch (e) { console.error('Erro ao ler acessos:', e); EMPRESAS_PERMITIDAS = []; }
+}
+
+// Mostra/esconde as abas de cartões conforme a empresa permitida
+function aplicarPermissoes() {
+  CARTOES.forEach(c => {
+    const btn = document.getElementById('nav-' + c.id);
+    if (btn) btn.style.display = empresaPermitida(c.empresa) ? '' : 'none';
+  });
 }
 
 // Migração única: se a nuvem estiver vazia e houver dados antigos no navegador, sobe pra nuvem
@@ -1225,6 +1258,8 @@ function confirmarImportacao() {
 // NAVEGAÇÃO
 // ══════════════════════════════════════════════════════
 function irPara(sec, btn) {
+  // Bloqueia acesso a cartão de empresa não permitida
+  if (['bb','unicred','itau'].includes(sec) && !cartaoPermitido(sec)) { irPara('dashboard'); return; }
   document.querySelectorAll('.secao').forEach(s => s.classList.remove('ativa'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('ativo'));
   document.getElementById('sec-' + sec).classList.add('ativa');
@@ -1281,10 +1316,11 @@ function renderDashboard() {
   const mes = document.getElementById('dash-mes').value;
   const ano = document.getElementById('dash-ano').value;
   const todos = getLancamentos();
-  const filtrados = filtrarPorMesAno(todos, mes, ano);
+  const filtrados = filtrarPorMesAno(todos, mes, ano).filter(l => cartaoPermitido(l.cartao));
+  const CARDS = cartoesPermitidos();
   let cardsHTML = '';
   let totalGeral = 0;
-  CARTOES.forEach(c => {
+  CARDS.forEach(c => {
     const itens = filtrados.filter(l => l.cartao === c.id);
     const total = itens.reduce((s, l) => s + Number(l.valor), 0);
     const conc  = itens.filter(l => l.status === 'Conciliado').reduce((s, l) => s + Number(l.valor), 0);
@@ -1303,10 +1339,10 @@ function renderDashboard() {
       '<tr><td colspan="4" style="padding:20px;text-align:center;color:#888">Nenhum lançamento neste período.</td></tr>';
     return;
   }
-  let linhas = `<thead><tr><th>Categoria</th>${CARTOES.map(c=>`<th>${c.nome}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
-  let totCols = CARTOES.map(() => 0), totG = 0;
+  let linhas = `<thead><tr><th>Categoria</th>${CARDS.map(c=>`<th>${c.nome}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
+  let totCols = CARDS.map(() => 0), totG = 0;
   cats.forEach(cat => {
-    const vals = CARTOES.map(c => filtrados.filter(l=>l.cartao===c.id&&l.categoria===cat).reduce((s,l)=>s+Number(l.valor),0));
+    const vals = CARDS.map(c => filtrados.filter(l=>l.cartao===c.id&&l.categoria===cat).reduce((s,l)=>s+Number(l.valor),0));
     const tot = vals.reduce((a,b)=>a+b,0);
     vals.forEach((v,i) => totCols[i]+=v); totG+=tot;
     linhas += `<tr><td>${cat}</td>${vals.map(v=>`<td>${v?fmt(v):'-'}</td>`).join('')}<td><strong>${fmt(tot)}</strong></td></tr>`;
@@ -1579,7 +1615,7 @@ function excluirLancamento(id) {
 function renderConciliacao() {
   const mes = document.getElementById('conc-mes').value;
   const ano = document.getElementById('conc-ano').value;
-  const conc = filtrarPorMesAno(getLancamentos(), mes, ano).filter(l => l.status === 'Conciliado');
+  const conc = filtrarPorMesAno(getLancamentos(), mes, ano).filter(l => l.status === 'Conciliado' && cartaoPermitido(l.cartao));
   const total = conc.reduce((s,l)=>s+Number(l.valor),0);
 
   let html = `<div class="cards-grid" style="margin-bottom:20px">
@@ -1619,7 +1655,7 @@ function renderRelatorio() {
   const mesFim = Number(document.getElementById('rel-mes-fim').value);
   const anoFim = Number(document.getElementById('rel-ano-fim').value);
   dadosRelatorio = getLancamentos().filter(l => {
-    if (!l.data) return false;
+    if (!l.data || !cartaoPermitido(l.cartao)) return false;
     const d = new Date(l.data+'T00:00:00'); const y=d.getFullYear(), m=d.getMonth()+1;
     return (y>anoIni||(y===anoIni&&m>=mesIni)) && (y<anoFim||(y===anoFim&&m<=mesFim));
   }).sort((a,b)=>a.data>b.data?1:-1);
@@ -1764,6 +1800,7 @@ async function iniciarApp() {
     return;
   }
   document.getElementById('login-overlay').style.display = 'none';
+  aplicarPermissoes();
   // Código contábil padrão do Itaú P4H (informado pela contabilidade)
   const cods = getCodigosCartoes();
   if (!cods.itau) { cods.itau = '6598'; salvarCodigosCartoes(cods); }
