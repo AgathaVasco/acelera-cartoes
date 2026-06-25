@@ -239,7 +239,8 @@
       style="width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:8px;margin-bottom:14px;box-sizing:border-box;font-size:.95rem" />
     <button onclick="fazerLogin()" id="login-btn"
       style="width:100%;padding:12px;background:var(--azul-meio);color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer">Entrar</button>
-    <p id="login-erro" style="color:#c0392b;font-size:.85rem;margin:12px 0 0;min-height:1em"></p>
+    <p style="text-align:center;margin:12px 0 0"><a href="#" onclick="esqueciSenha();return false;" style="color:var(--azul-meio);font-size:.85rem;text-decoration:none">Esqueci minha senha</a></p>
+    <p id="login-erro" style="color:#c0392b;font-size:.85rem;margin:10px 0 0;min-height:1em"></p>
     </div>
   </div>
 </div>
@@ -467,7 +468,11 @@ const CARTOES = [
 
 // Empresas que o usuário logado pode acessar. Vazio = vê todas (admin/padrão).
 let EMPRESAS_PERMITIDAS = [];
-function empresaPermitida(emp) { return EMPRESAS_PERMITIDAS.length === 0 || EMPRESAS_PERMITIDAS.includes(emp); }
+function empresaPermitida(emp) {
+  if (EMPRESAS_PERMITIDAS.length === 0) return true;
+  const norm = s => String(s || '').trim().toLowerCase();
+  return EMPRESAS_PERMITIDAS.map(norm).includes(norm(emp));
+}
 function cartaoPermitido(id) { const c = CARTOES.find(x => x.id === id); return c ? empresaPermitida(c.empresa) : false; }
 function cartoesPermitidos() { return CARTOES.filter(c => empresaPermitida(c.empresa)); }
 
@@ -1792,6 +1797,38 @@ async function fazerLogout() {
   location.reload();
 }
 
+// Envia link de redefinição de senha para o e-mail digitado
+async function esqueciSenha() {
+  const email = document.getElementById('login-email').value.trim();
+  const erro  = document.getElementById('login-erro');
+  if (!email) {
+    erro.style.color = '#c0392b';
+    erro.textContent = 'Digite seu e-mail no campo acima e clique de novo em "Esqueci minha senha".';
+    return;
+  }
+  const redirectTo = window.location.href.split('#')[0];
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) { erro.style.color = '#c0392b'; erro.textContent = 'Erro: ' + error.message; return; }
+  erro.style.color = '#16895A';
+  erro.textContent = '✅ Enviamos um link para ' + email + '. Confira seu e-mail (e a caixa de spam).';
+}
+
+// Quando o usuário volta pelo link de redefinição, pede a nova senha
+sb.auth.onAuthStateChange(async (event) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    let nova = '';
+    while (nova.length < 6) {
+      nova = prompt('Defina sua NOVA senha (mínimo 6 caracteres):') || '';
+      if (nova === '') return; // cancelou
+      if (nova.length < 6) alert('A senha precisa ter pelo menos 6 caracteres.');
+    }
+    const { error } = await sb.auth.updateUser({ password: nova });
+    if (error) { alert('Erro ao atualizar a senha: ' + error.message); return; }
+    alert('✅ Senha atualizada com sucesso! O app vai abrir normalmente.');
+    await iniciarApp();
+  }
+});
+
 async function iniciarApp() {
   try {
     await carregarTudo();
@@ -1811,6 +1848,8 @@ async function iniciarApp() {
 
 // Se já houver sessão ativa, entra direto; senão, mostra a tela de login
 (async function() {
+  // Se voltou pelo link de redefinição de senha, deixa o handler de recuperação cuidar
+  if (window.location.hash.includes('type=recovery')) return;
   const { data } = await sb.auth.getSession();
   if (data && data.session) await iniciarApp();
 })();
