@@ -136,6 +136,12 @@
     tbody td:last-child { white-space: nowrap; }
     tbody tr:last-child td { border-bottom: none; }
     .badge { display: inline-block; padding: 3px 11px; border-radius: 20px; font-size: .76rem; font-weight: 600; }
+
+    /* Tabela de fatura dos cartões: quebra linha nos textos longos para não cortar as últimas colunas */
+    .tbl-fatura td:nth-child(3), .tbl-fatura td:nth-child(4) { max-width: 190px; white-space: normal; overflow-wrap: anywhere; }
+    .tbl-fatura td:nth-child(5) { max-width: 150px; }
+    .tbl-fatura td:nth-child(5) .badge { white-space: normal; }
+    .tbl-fatura td:nth-child(2), .tbl-fatura td:nth-child(8), .tbl-fatura td:nth-child(9), .tbl-fatura td:nth-child(10) { white-space: nowrap; }
     .badge-pendente   { background: #fff3cd; color: #856404; }
     .badge-conciliado { background: var(--verde-bg); color: var(--verde); }
     .badge-contestado { background: var(--laranja-bg); color: var(--laranja); }
@@ -593,9 +599,11 @@ async function carregarAcessos() {
   try {
     const { data: u } = await sb.auth.getUser();
     const email = (u && u.user && u.user.email || '').toLowerCase();
-    const { data, error } = await sb.from('acessos').select('empresa');
+    const { data, error } = await sb.from('acessos').select('email, empresa');
     if (error) return; // tabela ainda não existe ou sem acesso → vê todas
-    const empresas = (data || []).map(r => String(r.empresa || '').trim());
+    // Considera apenas as linhas do usuário logado (comparação sem diferenciar maiúsculas)
+    const minhas = (data || []).filter(r => String(r.email || '').trim().toLowerCase() === email);
+    const empresas = minhas.map(r => String(r.empresa || '').trim());
     // Se o usuário tem 'Todas' ou nenhuma linha, vê todas. Senão, só as listadas.
     if (empresas.length === 0 || empresas.some(e => e.toLowerCase() === 'todas')) {
       EMPRESAS_PERMITIDAS = [];
@@ -1404,7 +1412,7 @@ function renderCartao(id) {
       <div class="card-resumo laranja"><h3>Pendente</h3><div class="valor">${fmt(total-conc)}</div></div>
     </div>
     <div class="tabela-wrap">
-    <table>
+    <table class="tbl-fatura">
       <thead><tr>
         <th>#</th><th>Data</th><th>Fornecedor</th><th>Descrição</th>
         <th>Categoria</th><th>Centro</th><th>Responsável</th>
