@@ -9,11 +9,13 @@ Mantido na nuvem (GitHub) para nunca se perder.
 
 ### 1) Controle de Cartões de Crédito (app web)
 - **Link do app:** https://agathavasco.github.io/acelera-cartoes/
-- **O que faz:** controle de faturas dos cartões, importação de PDF, conciliação, relatório contábil (CSV), anexos de notas/comprovantes.
-- **Cartões e empresas:**
+- **O que faz:** controle de faturas dos cartões e extrato bancário, importação de PDF, conciliação, relatório contábil (CSV), anexos de notas/comprovantes.
+- **Abas e empresas:**
   - Acelera Corretora → Banco do Brasil, Unicred
   - P4H Saúde → Itaú P4H
+  - Planoo Tecnologia → Extrato Planoo (conta corrente Itaú, com Entradas e Saídas)
 - **Login:** cada usuário entra com e-mail e senha. Tem "Esqueci minha senha".
+- **Categorias inteligentes:** quando você confirma uma categoria (na importação ou editando um lançamento), o app memoriza "fornecedor → categoria" e já sugere sozinho nos próximos meses.
 
 ### 2) Central Contábil P4H (arquivo no computador)
 - **Arquivo:** `P4H_Central_Automacoes_1.html` (abre direto no navegador, dois cliques)

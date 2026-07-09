@@ -142,6 +142,12 @@
     .tbl-fatura td:nth-child(5) { max-width: 150px; }
     .tbl-fatura td:nth-child(5) .badge { white-space: normal; }
     .tbl-fatura td:nth-child(2), .tbl-fatura td:nth-child(8), .tbl-fatura td:nth-child(9), .tbl-fatura td:nth-child(10) { white-space: nowrap; }
+    /* Extrato tem coluna extra "Tipo" (3ª), então as colunas de texto ficam uma à frente */
+    .tbl-extrato td:nth-child(3) { max-width: none; white-space: nowrap; }
+    .tbl-extrato td:nth-child(4), .tbl-extrato td:nth-child(5) { max-width: 190px; white-space: normal; overflow-wrap: anywhere; }
+    .tbl-extrato td:nth-child(6) { max-width: 150px; white-space: normal; }
+    .tbl-extrato td:nth-child(6) .badge { white-space: normal; }
+    .tbl-extrato td:nth-child(9) { white-space: nowrap; }
     .badge-pendente   { background: #fff3cd; color: #856404; }
     .badge-conciliado { background: var(--verde-bg); color: var(--verde); }
     .badge-contestado { background: var(--laranja-bg); color: var(--laranja); }
@@ -267,6 +273,7 @@
   <button id="nav-bb" onclick="irPara('bb', this)">Banco do Brasil</button>
   <button id="nav-unicred" onclick="irPara('unicred', this)">Unicred</button>
   <button id="nav-itau" onclick="irPara('itau', this)">Itaú P4H</button>
+  <button id="nav-extrato-planoo" onclick="irPara('extrato-planoo', this)">Extrato Planoo</button>
   <button onclick="irPara('conciliacao', this)">Conciliação</button>
   <button onclick="irPara('relatorio', this)">Relatório</button>
   <button onclick="abrirCategorias()" style="margin-left:auto">⚙ Categorias</button>
@@ -297,6 +304,10 @@
 
   <div id="sec-itau" class="secao">
     <div id="content-itau"></div>
+  </div>
+
+  <div id="sec-extrato-planoo" class="secao">
+    <div id="content-extrato-planoo"></div>
   </div>
 
   <div id="sec-conciliacao" class="secao">
@@ -353,6 +364,13 @@
     <div class="form-grid">
       <div class="campo"><label>Data da Compra *</label><input type="date" id="f-data" /></div>
       <div class="campo"><label>Cartão</label><input type="text" id="f-cartao" readonly style="background:#f4f6fa" /></div>
+      <div class="campo" id="campo-tipo" style="display:none">
+        <label>Tipo *</label>
+        <select id="f-tipo">
+          <option value="saida">Saída (pagamento)</option>
+          <option value="entrada">Entrada (recebimento)</option>
+        </select>
+      </div>
       <div class="campo full"><label>Fornecedor / Estabelecimento *</label><input type="text" id="f-fornecedor" placeholder="Ex: Posto Shell, Supermercado..." /></div>
       <div class="campo"><label>CNPJ / CPF do Fornecedor</label><input type="text" id="f-cnpj" placeholder="00.000.000/0001-00" /></div>
       <div class="campo"><label>Nº Nota Fiscal</label><input type="text" id="f-nf" placeholder="000000" /></div>
@@ -393,8 +411,8 @@
     <h2>⚙ Gerenciar Categorias</h2>
 
     <div style="margin-bottom:18px;background:#f0f4ff;border-radius:10px;padding:14px">
-      <strong style="display:block;margin-bottom:10px;color:var(--azul)">Contas dos Cartões (conta crédito no lançamento contábil)</strong>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <strong style="display:block;margin-bottom:10px;color:var(--azul)">Contas dos Cartões e Bancos (contrapartida no lançamento contábil)</strong>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div>
           <label style="font-size:.85rem;color:#555">Banco do Brasil</label>
           <input id="cod-cartao-bb" type="text" placeholder="Ex: 1234"
@@ -412,6 +430,12 @@
           <input id="cod-cartao-itau" type="text" placeholder="Ex: 6598"
             style="width:100%;padding:7px 10px;border:1px solid #ccc;border-radius:7px;margin-top:4px;box-sizing:border-box"
             onchange="salvarCodCartao('itau', this.value)" />
+        </div>
+        <div>
+          <label style="font-size:.85rem;color:#555">Extrato Planoo (conta banco)</label>
+          <input id="cod-cartao-extrato-planoo" type="text" placeholder="Ex: 9999"
+            style="width:100%;padding:7px 10px;border:1px solid #ccc;border-radius:7px;margin-top:4px;box-sizing:border-box"
+            onchange="salvarCodCartao('extrato-planoo', this.value)" />
         </div>
       </div>
     </div>
@@ -470,6 +494,7 @@ const CARTOES = [
   { id: 'bb',      nome: 'Banco do Brasil', empresa: 'Acelera Corretora' },
   { id: 'unicred', nome: 'Unicred',         empresa: 'Acelera Corretora' },
   { id: 'itau',    nome: 'Itaú P4H',        empresa: 'P4H Saúde'         },
+  { id: 'extrato-planoo', nome: 'Extrato Planoo', empresa: 'Planoo Tecnologia', tipo: 'extrato' },
 ];
 
 // Empresas que o usuário logado pode acessar. Vazio = vê todas (admin/padrão).
@@ -498,6 +523,7 @@ const CATEGORIAS_PADRAO = [
   'Impostos e Taxas',
   'Treinamento / Capacitação',
   'Anuidade / Tarifa Bancária',
+  'Recebimentos',
   'Outros',
 ];
 
@@ -519,6 +545,7 @@ function toRow(l) {
     descricao:l.descricao||null, categoria:l.categoria||null, cc:l.cc||null,
     responsavel:l.responsavel||null, valor:Number(l.valor)||0, parcela:l.parcela||null,
     status:l.status||'Pendente', obs:l.obs||null, competencia:l.competencia||null,
+    tipo:l.tipo||null,
     anexos: Array.isArray(l.anexos) ? l.anexos : [] };
 }
 function fromRow(r) {
@@ -527,6 +554,7 @@ function fromRow(r) {
     descricao:r.descricao||'', categoria:r.categoria||'', cc:r.cc||'',
     responsavel:r.responsavel||'', valor:Number(r.valor)||0, parcela:r.parcela||'',
     status:r.status||'Pendente', obs:r.obs||'', competencia:r.competencia||'',
+    tipo:r.tipo||'',
     anexos: Array.isArray(r.anexos) ? r.anexos : [] };
 }
 
@@ -541,6 +569,34 @@ function getCodigosContabeis() { return _cfg.codigos_contabeis || {}; }
 function salvarCodigosContabeis(obj) { _cfg.codigos_contabeis = obj; salvarConfig('codigos_contabeis', obj); }
 function getCodigosCartoes() { return _cfg.codigos_cartoes || {}; }
 function salvarCodigosCartoes(obj) { _cfg.codigos_cartoes = obj; salvarConfig('codigos_cartoes', obj); }
+
+// ── Aprendizado de categorias: memoriza "fornecedor → categoria" para os próximos meses ──
+function getRegrasAprendidas() { return _cfg.regras_aprendidas || {}; }
+// Normaliza o nome do fornecedor para servir de chave (remove números/datas que mudam a cada mês)
+function chaveAprendizado(fornecedor) {
+  return String(fornecedor || '').toLowerCase()
+    .replace(/\d[\d\/.,-]*/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 50);
+}
+// Grava várias regras de uma vez (uma gravação só na nuvem)
+function aprenderCategorias(pares) {
+  const regras = getRegrasAprendidas();
+  let mudou = false;
+  pares.forEach(p => {
+    const chave = chaveAprendizado(p.fornecedor);
+    if (!chave || !p.categoria) return;
+    if (regras[chave] !== p.categoria) { regras[chave] = p.categoria; mudou = true; }
+  });
+  if (mudou) { _cfg.regras_aprendidas = regras; salvarConfig('regras_aprendidas', regras); }
+}
+
+// Valor com sinal para totais: entradas (recebimentos) abatem, saídas/despesas somam
+function valorContabil(l) { return l.tipo === 'entrada' ? -Number(l.valor || 0) : Number(l.valor || 0); }
+// Exibição do valor na tabela: entradas em verde com sinal +
+function fmtLanc(l) {
+  return l.tipo === 'entrada'
+    ? `<strong style="color:var(--verde)">+ ${fmt(l.valor)}</strong>`
+    : `<strong>${fmt(l.valor)}</strong>`;
+}
 
 // CATEGORIAS é sempre lido via getCategorias() — mantido como alias para compatibilidade
 let CATEGORIAS = getCategorias();
@@ -656,12 +712,21 @@ const REGRAS_CAT = [
   { cat: 'Material de Escritório',       kw: ['papelaria','kalunga','staples','mart papelaria','escrit'] },
   { cat: 'Manutenção / Reparos',         kw: ['mahle','autopeca','borracharia','mecanica','eletrica auto','manutencao'] },
   { cat: 'Serviços de Terceiros',        kw: ['carimbo','adricom','quality','pg *d4s','mercadopago','mercadolivre','mp*','hna','oboticario','bela joia','loja 7','bokitos'] },
-  { cat: 'Anuidade / Tarifa Bancária',   kw: ['anuidade','tarifa','iof','encargo'] },
+  { cat: 'Anuidade / Tarifa Bancária',   kw: ['anuidade','tarifa','iof','encargo','tar manut','int pre-pago'] },
+  { cat: 'Impostos e Taxas',             kw: ['darf','sefaz','dare ','gps ','inss','fgts','tributo','prefeitura','arrecadacao'] },
+  { cat: 'Recebimentos',                 kw: ['pix recebido','recebimentos','ted recebida'] },
 ];
 
-function sugerirCategoria(desc) {
-  if (!desc) return '';
-  const d = desc.toLowerCase();
+function sugerirCategoria(desc, fornecedor) {
+  if (!desc && !fornecedor) return '';
+  // 1º: regras aprendidas nos meses anteriores (fornecedor → categoria)
+  const regras = getRegrasAprendidas();
+  for (const texto of [fornecedor, desc]) {
+    const chave = chaveAprendizado(texto);
+    if (chave && regras[chave]) return regras[chave];
+  }
+  // 2º: palavras-chave
+  const d = ((desc || '') + ' ' + (fornecedor || '')).toLowerCase();
   for (const r of REGRAS_CAT) {
     if (r.kw.some(k => d.includes(k))) return r.cat;
   }
@@ -924,6 +989,71 @@ function parsearBB(texto) {
 }
 
 // ══════════════════════════════════════════════════════
+// PARSER EXTRATO ITAÚ (conta corrente — ex: Planoo)
+// Formato: Data | Lançamento | Razão Social | CNPJ/CPF | Valor (negativo = saída) | Saldo
+// ══════════════════════════════════════════════════════
+function parsearExtratoItau(texto) {
+  const flat = texto.replace(/\n/g, ' ');
+  const RE_DATA = /(\d{2})\/(\d{2})\/(\d{4})/g;
+  const tokens = [];
+  let m;
+  while ((m = RE_DATA.exec(flat)) !== null) {
+    tokens.push({ dia: m[1], mes: m[2], ano: m[3], start: m.index, end: m.index + m[0].length });
+  }
+
+  // Prefixos de operação do Itaú: o que vem depois deles é o nome do favorecido/pagador
+  const PREFIXOS = ['PAGAMENTOS PIX QR-CODE','PAGAMENTOS TRIB COD BARRAS','PAGAMENTOS PIX','PIX RECEBIDO','PIX ENVIADO','PIX TRANSF','BOLETO PAGO','TAR MANUT CONTA','TED RECEBIDA','TED ENVIADA','RECEBIMENTOS','INT PRE-PAGO','ITAU VISA','DEB AUT','APLICACAO','RESGATE','TBI','DOC'];
+
+  const lancamentos = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const fim = i + 1 < tokens.length ? tokens[i + 1].start : flat.length;
+    const chunk = flat.substring(t.end, fim).trim();
+
+    // Pula linhas de saldo (não são lançamentos)
+    if (/SALDO ANTERIOR|SALDO TOTAL|SALDO DO DIA|SALDO DISPON/i.test(chunk)) continue;
+
+    // Valor: primeiro número no formato brasileiro (o CNPJ não tem vírgula, então não confunde)
+    const valorMatch = chunk.match(/(-?\d{1,3}(?:\.\d{3})*,\d{2})(?!\d)/);
+    if (!valorMatch) continue;
+    const bruto = parseFloat(valorMatch[1].replace(/\./g, '').replace(',', '.'));
+    if (!bruto) continue;
+    const tipo  = bruto < 0 ? 'saida' : 'entrada';
+    const valor = Math.abs(bruto);
+
+    let antes = chunk.substring(0, chunk.indexOf(valorMatch[1])).trim();
+
+    // CNPJ ou CPF informado pelo banco
+    const cnpjMatch = antes.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|\d{3}\.\d{3}\.\d{3}-\d{2}/);
+    const cnpj = cnpjMatch ? cnpjMatch[0] : '';
+    if (cnpj) antes = antes.replace(cnpj, '').trim();
+
+    // Separa a operação (prefixo) do nome do favorecido
+    let fornecedor = antes;
+    for (const p of PREFIXOS) {
+      if (antes.toUpperCase().startsWith(p)) {
+        const resto = antes.substring(p.length).trim();
+        // Se sobrou só número/data (ex: "TAR MANUT CONTA 05/26"), mantém a descrição completa
+        fornecedor = /[a-zA-Z]/.test(resto) ? resto : antes;
+        break;
+      }
+    }
+
+    lancamentos.push({
+      data: `${t.ano}-${t.mes}-${t.dia}`,
+      fornecedor: fornecedor.substring(0, 60),
+      cnpj,
+      descricao: antes,
+      tipo,
+      valor,
+      parcela: '',
+      categoria: sugerirCategoria(antes, fornecedor),
+    });
+  }
+  return lancamentos;
+}
+
+// ══════════════════════════════════════════════════════
 // LER PDF
 // ══════════════════════════════════════════════════════
 let cartaoImportando = null;
@@ -932,16 +1062,18 @@ let lancamentosImportados = [];
 function abrirImportar(cartaoId) {
   cartaoImportando = cartaoId;
   const c = CARTOES.find(x => x.id === cartaoId);
-  document.getElementById('imp-titulo').textContent = `Importar Fatura — ${c.nome}`;
+  const ehExtrato = c && c.tipo === 'extrato';
+  const docNome = ehExtrato ? 'extrato' : 'fatura';
+  document.getElementById('imp-titulo').textContent = `Importar ${ehExtrato ? 'Extrato' : 'Fatura'} — ${c.nome}`;
   document.getElementById('btn-confirmar-imp').style.display = 'none';
   document.getElementById('imp-conteudo').innerHTML = `
     <div class="info-box">
-      Selecione o PDF da fatura. O sistema lerá os lançamentos automaticamente e sugerirá categorias. Você só precisa revisar e confirmar.
+      Selecione o PDF do ${docNome}. O sistema lerá os lançamentos automaticamente e sugerirá categorias. Você só precisa revisar e confirmar.
     </div>
     <div class="upload-area" onclick="document.getElementById('inp-pdf').click()">
       <div class="icone">📄</div>
-      <p><strong>Clique aqui</strong> para selecionar o PDF da fatura</p>
-      <p style="margin-top:6px;font-size:.82rem;">Banco do Brasil ou Unicred</p>
+      <p><strong>Clique aqui</strong> para selecionar o PDF do ${docNome}</p>
+      <p style="margin-top:6px;font-size:.82rem;">${ehExtrato ? 'Extrato de conta corrente do Itaú' : 'Banco do Brasil ou Unicred'}</p>
       <input type="file" id="inp-pdf" accept=".pdf" onchange="lerPDF(this)" />
     </div>`;
   document.getElementById('overlay-importar').classList.add('aberto');
@@ -956,6 +1088,7 @@ function abrirCategorias() {
   document.getElementById('cod-cartao-bb').value = cods.bb || '';
   document.getElementById('cod-cartao-unicred').value = cods.unicred || '';
   document.getElementById('cod-cartao-itau').value = cods.itau || '';
+  document.getElementById('cod-cartao-extrato-planoo').value = cods['extrato-planoo'] || '';
   renderListaCategorias();
   document.getElementById('overlay-categorias').classList.add('aberto');
   document.getElementById('nova-cat-input').focus();
@@ -1120,15 +1253,18 @@ async function lerPDF(input) {
       else if (/Banco do Brasil|SALDO FATURA ANTERIOR|Ourocard/i.test(textoCompleto)) banco = 'bb';
       else banco = 'unicred';
     }
+    const contaImp = CARTOES.find(c => c.id === banco);
     const items = banco === 'bb'   ? parsearBB(textoCompleto)
                 : banco === 'itau' ? parsearItau(textoColunas)
+                : (contaImp && contaImp.tipo === 'extrato') ? parsearExtratoItau(textoCompleto)
                 : parsearUnicred(textoCompleto, textoRaw);
 
     // Aplica competência da fatura: sobrescreve mês/ano de TODOS os lançamentos
     // com o mês/ano selecionado no filtro (o que vale é sempre a competência da fatura)
+    // Exceção: extrato bancário usa as datas reais do próprio extrato.
     const selMesComp = document.getElementById(`filtro-mes-${cartaoImportando}`);
     const selAnoComp = document.getElementById(`filtro-ano-${cartaoImportando}`);
-    if (selMesComp && selAnoComp) {
+    if (selMesComp && selAnoComp && !(contaImp && contaImp.tipo === 'extrato')) {
       const mesComp = String(selMesComp.value).padStart(2, '0');
       const anoComp = selAnoComp.value;
       items.forEach(it => {
@@ -1163,35 +1299,48 @@ async function lerPDF(input) {
 
 function mostrarTabelaRevisao(items) {
   const semCat = items.filter(i => !i.categoria).length;
-  const total = items.reduce((s, i) => s + i.valor, 0);
+  const temTipo = items.some(i => i.tipo); // extrato: mostra coluna Entrada/Saída
+  const total = items.reduce((s, i) => s + valorContabil(i), 0);
+  const entradas = items.filter(i => i.tipo === 'entrada').reduce((s, i) => s + i.valor, 0);
+  const saidas   = items.filter(i => i.tipo !== 'entrada').reduce((s, i) => s + i.valor, 0);
+
+  const resumo = temTipo
+    ? `Entradas: <strong style="color:var(--verde)">${fmt(entradas)}</strong> · Saídas: <strong style="color:var(--laranja)">${fmt(saidas)}</strong>`
+    : `Total: <strong>${fmt(total)}</strong>`;
 
   let html = `
     <div class="info-box">
-      <strong>${items.length} lançamentos encontrados</strong> — Total: <strong>${fmt(total)}</strong>
+      <strong>${items.length} lançamentos encontrados</strong> — ${resumo}
       ${semCat ? `<br>⚠️ <strong>${semCat} item(s)</strong> sem categoria — selecione abaixo antes de importar.` : '<br>✅ Todas as categorias foram sugeridas automaticamente.'}
     </div>
     <div style="overflow:auto;max-height:50vh">
     <table class="imp-table">
       <thead><tr>
         <th><input type="checkbox" id="chk-todos" checked onchange="toggleTodos(this)" /></th>
-        <th>Data</th><th>Descrição</th><th>Valor</th>
+        <th>Data</th>${temTipo ? '<th>Tipo</th>' : ''}<th>Descrição</th><th>Valor</th>
         <th>Parcela</th><th>Responsável</th><th>Categoria *</th>
       </tr></thead>
       <tbody>`;
 
   items.forEach((item, i) => {
     const clsCat = item.categoria ? 'com-cat' : 'sem-cat';
+    // Garante que a categoria sugerida apareça mesmo que ainda não esteja na lista do usuário
+    const opcoes = CATEGORIAS.includes(item.categoria) || !item.categoria ? CATEGORIAS : [...CATEGORIAS, item.categoria];
+    const tdTipo = !temTipo ? '' : item.tipo === 'entrada'
+      ? '<td><span class="badge badge-conciliado">Entrada</span></td>'
+      : '<td><span class="badge badge-contestado">Saída</span></td>';
     html += `<tr>
       <td><input type="checkbox" class="chk-item" data-idx="${i}" checked onchange="atualizarTotalPreview()" /></td>
       <td>${item.data ? new Date(item.data+'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
+      ${tdTipo}
       <td>${item.descricao || item.fornecedor}</td>
-      <td><strong>${fmt(item.valor)}</strong></td>
+      <td>${fmtLanc(item)}</td>
       <td>${item.parcela || '-'}</td>
       <td>${item.responsavel || '-'}</td>
       <td>
         <select class="${clsCat}" onchange="atualizarCat(${i}, this)">
           <option value="">Selecione...</option>
-          ${CATEGORIAS.map(c => `<option value="${c}" ${c === item.categoria ? 'selected' : ''}>${c}</option>`).join('')}
+          ${opcoes.map(c => `<option value="${c}" ${c === item.categoria ? 'selected' : ''}>${c}</option>`).join('')}
         </select>
       </td>
     </tr>`;
@@ -1200,8 +1349,8 @@ function mostrarTabelaRevisao(items) {
   html += `</tbody>
     <tfoot>
       <tr style="background:#f0f4ff;font-weight:bold;border-top:2px solid #c0c8e0">
-        <td colspan="3" style="padding:10px 8px;text-align:right">Total selecionado:</td>
-        <td id="total-imp-preview" style="padding:10px 8px;font-size:1.05rem;color:#1a237e">${fmt(total)}</td>
+        <td colspan="${temTipo ? 4 : 3}" style="padding:10px 8px;text-align:right">${temTipo ? 'Resultado selecionado (entradas − saídas):' : 'Total selecionado:'}</td>
+        <td id="total-imp-preview" style="padding:10px 8px;font-size:1.05rem;color:#1a237e">${fmt(temTipo ? -total : total)}</td>
         <td colspan="3"></td>
       </tr>
     </tfoot>
@@ -1215,8 +1364,14 @@ function atualizarTotalPreview() {
   const totalEl = document.getElementById('total-imp-preview');
   if (!totalEl) return;
   const checados = [...document.querySelectorAll('.chk-item:checked')].map(c => Number(c.dataset.idx));
-  const soma = checados.reduce((s, i) => s + (lancamentosImportados[i]?.valor || 0), 0);
-  totalEl.textContent = fmt(soma);
+  const temTipo = lancamentosImportados.some(i => i && i.tipo);
+  const soma = checados.reduce((s, i) => {
+    const item = lancamentosImportados[i];
+    if (!item) return s;
+    return s + (temTipo ? valorContabil(item) : Number(item.valor || 0));
+  }, 0);
+  // No extrato o "total" é o resultado líquido: entradas abatem, saídas somam
+  totalEl.textContent = fmt(temTipo ? -soma : soma);
 }
 
 function toggleTodos(chk) {
@@ -1246,7 +1401,7 @@ function confirmarImportacao() {
       cartao:      cartaoImportando,
       data:        item.data || '',
       fornecedor:  item.fornecedor || '',
-      cnpj:        '',
+      cnpj:        item.cnpj || '',
       nf:          '',
       serie:       '',
       dataNf:      '',
@@ -1258,8 +1413,12 @@ function confirmarImportacao() {
       parcela:     item.parcela || '',
       status:      'Pendente',
       obs:         'Importado via PDF',
+      tipo:        item.tipo || '',
     });
   });
+
+  // Memoriza as categorias confirmadas para sugerir automaticamente nos próximos meses
+  aprenderCategorias(checados.map(i => lancamentosImportados[i]).filter(it => it && it.categoria));
 
   salvarTodos(lista);
   fecharImportar();
@@ -1271,16 +1430,15 @@ function confirmarImportacao() {
 // NAVEGAÇÃO
 // ══════════════════════════════════════════════════════
 function irPara(sec, btn) {
-  // Bloqueia acesso a cartão de empresa não permitida
-  if (['bb','unicred','itau'].includes(sec) && !cartaoPermitido(sec)) { irPara('dashboard'); return; }
+  // Bloqueia acesso a conta/cartão de empresa não permitida
+  const conta = CARTOES.find(c => c.id === sec);
+  if (conta && !cartaoPermitido(sec)) { irPara('dashboard'); return; }
   document.querySelectorAll('.secao').forEach(s => s.classList.remove('ativa'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('ativo'));
   document.getElementById('sec-' + sec).classList.add('ativa');
   if (btn) btn.classList.add('ativo');
   if (sec === 'dashboard')   renderDashboard();
-  if (sec === 'bb')          renderCartao('bb');
-  if (sec === 'unicred')     renderCartao('unicred');
-  if (sec === 'itau')        renderCartao('itau');
+  if (conta)                 renderCartao(sec);
   if (sec === 'conciliacao') renderConciliacao();
   if (sec === 'relatorio')   renderRelatorio();
 }
@@ -1335,6 +1493,15 @@ function renderDashboard() {
   let totalGeral = 0;
   CARDS.forEach(c => {
     const itens = filtrados.filter(l => l.cartao === c.id);
+    if (c.tipo === 'extrato') {
+      const entradas = itens.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+Number(l.valor),0);
+      const saidas   = itens.filter(l=>l.tipo!=='entrada').reduce((s,l)=>s+Number(l.valor),0);
+      totalGeral += saidas; // no total geral de despesas, o extrato entra só com as saídas
+      cardsHTML += `<div class="card-resumo"><h3>${c.nome}</h3><div class="valor">${fmt(saidas)}</div>
+        <div class="sub">Saídas · Entradas: ${fmt(entradas)}</div>
+        <div class="sub">${itens.length} lançamento(s)</div></div>`;
+      return;
+    }
     const total = itens.reduce((s, l) => s + Number(l.valor), 0);
     const conc  = itens.filter(l => l.status === 'Conciliado').reduce((s, l) => s + Number(l.valor), 0);
     totalGeral += total;
@@ -1387,12 +1554,16 @@ function renderCartao(id) {
   let opsMes = MESES.map((m,i) => `<option value="${i+1}" ${i+1===mesSel?'selected':''}>${m}</option>`).join('');
   let opsAno = anos.map(a => `<option value="${a}" ${a===anoSel?'selected':''}>${a}</option>`).join('');
 
+  const conta = CARTOES.find(x => x.id === id) || {};
+  const ehExtrato = conta.tipo === 'extrato';
+  const docNome = ehExtrato ? 'do Extrato' : 'da Fatura';
+
   document.getElementById(`content-${id}`).innerHTML = `
     <div class="filtro-bar">
       <label>Mês / Ano:</label>
       <select id="filtro-mes-${id}" onchange="renderCartao('${id}')">${opsMes}</select>
       <select id="filtro-ano-${id}" onchange="renderCartao('${id}')">${opsAno}</select>
-      <button class="btn btn-laranja" onclick="abrirImportar('${id}')">📄 Importar PDF da Fatura</button>
+      <button class="btn btn-laranja" onclick="abrirImportar('${id}')">📄 Importar PDF ${docNome}</button>
       <button class="btn btn-azul" onclick="abrirModal('${id}')">+ Lançamento Manual</button>
       <button class="btn btn-vermelho" onclick="limparMes('${id}', ${mesSel}, ${anoSel})">🗑 Limpar Mês</button>
     </div>`;
@@ -1404,17 +1575,35 @@ function renderCartao(id) {
   const total = itens.reduce((s,l)=>s+Number(l.valor),0);
   const conc  = itens.filter(l=>l.status==='Conciliado').reduce((s,l)=>s+Number(l.valor),0);
 
+  let cardsResumo;
+  if (ehExtrato) {
+    const entradas = itens.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+Number(l.valor),0);
+    const saidas   = itens.filter(l=>l.tipo!=='entrada').reduce((s,l)=>s+Number(l.valor),0);
+    const pend     = itens.filter(l=>l.status!=='Conciliado').length;
+    cardsResumo = `
+      <div class="card-resumo verde"><h3>Entradas</h3><div class="valor">${fmt(entradas)}</div></div>
+      <div class="card-resumo laranja"><h3>Saídas</h3><div class="valor">${fmt(saidas)}</div></div>
+      <div class="card-resumo"><h3>Resultado do Mês</h3><div class="valor">${fmt(entradas-saidas)}</div></div>
+      <div class="card-resumo"><h3>Pendentes</h3><div class="valor">${pend}</div><div class="sub">lançamento(s) sem conciliar</div></div>`;
+  } else {
+    cardsResumo = `
+      <div class="card-resumo"><h3>Total Fatura</h3><div class="valor">${fmt(total)}</div></div>
+      <div class="card-resumo verde"><h3>Conciliado</h3><div class="valor">${fmt(conc)}</div></div>
+      <div class="card-resumo laranja"><h3>Pendente</h3><div class="valor">${fmt(total-conc)}</div></div>`;
+  }
+
+  const thTipo = ehExtrato ? '<th>Tipo</th>' : '';
+  const nCols = ehExtrato ? 12 : 11;
+
   const cont = document.getElementById(`content-${id}`);
   cont.innerHTML += `
     <div class="cards-grid" style="margin-bottom:20px">
-      <div class="card-resumo"><h3>Total Fatura</h3><div class="valor">${fmt(total)}</div></div>
-      <div class="card-resumo verde"><h3>Conciliado</h3><div class="valor">${fmt(conc)}</div></div>
-      <div class="card-resumo laranja"><h3>Pendente</h3><div class="valor">${fmt(total-conc)}</div></div>
+      ${cardsResumo}
     </div>
     <div class="tabela-wrap">
-    <table class="tbl-fatura">
+    <table class="tbl-fatura${ehExtrato ? ' tbl-extrato' : ''}">
       <thead><tr>
-        <th>#</th><th>Data</th><th>Fornecedor</th><th>Descrição</th>
+        <th>#</th><th>Data</th>${thTipo}<th>Fornecedor</th><th>Descrição</th>
         <th>Categoria</th><th>Centro</th><th>Responsável</th>
         <th>Valor</th><th>Parcela</th><th>Status</th><th>Ações</th>
       </tr></thead>
@@ -1423,12 +1612,13 @@ function renderCartao(id) {
           <tr>
             <td>${i+1}</td>
             <td>${l.data?new Date(l.data+'T00:00:00').toLocaleDateString('pt-BR'):'-'}</td>
+            ${ehExtrato ? (l.tipo==='entrada' ? '<td><span class="badge badge-conciliado">Entrada</span></td>' : '<td><span class="badge badge-contestado">Saída</span></td>') : ''}
             <td>${l.fornecedor||'-'}</td>
             <td>${l.descricao||'-'}</td>
             <td>${l.categoria ? `<span class="badge badge-conciliado">${l.categoria}</span>` : '<span class="badge badge-pendente">Sem categoria</span>'}</td>
             <td>${l.cc||'-'}</td>
             <td>${l.responsavel||'-'}</td>
-            <td><strong>${fmt(l.valor)}</strong></td>
+            <td>${fmtLanc(l)}</td>
             <td>${l.parcela||'-'}</td>
             <td>${badge(l.status)}</td>
             <td>
@@ -1437,9 +1627,9 @@ function renderCartao(id) {
               <button class="btn btn-vermelho btn-icon" onclick="excluirLancamento('${l.id}')" title="Excluir">🗑️</button>
             </td>
           </tr>`).join('') :
-          `<tr><td colspan="11" style="text-align:center;padding:30px;color:#888">
+          `<tr><td colspan="${nCols}" style="text-align:center;padding:30px;color:#888">
             Nenhum lançamento neste período.<br>
-            <span style="font-size:.85rem">Clique em "📄 Importar PDF da Fatura" ou "+ Lançamento Manual"</span>
+            <span style="font-size:.85rem">Clique em "📄 Importar PDF ${docNome}" ou "+ Lançamento Manual"</span>
           </td></tr>`}
       </tbody>
     </table></div>`;
@@ -1455,6 +1645,11 @@ function abrirModal(cartaoId, id) {
   document.getElementById('modal-titulo').textContent = id ? 'Editar Lançamento' : 'Novo Lançamento — ' + c.nome;
   document.getElementById('f-cartao').value = c.nome;
 
+  // Campo Tipo (Entrada/Saída) só aparece nas contas de extrato bancário
+  const ehExtrato = c.tipo === 'extrato';
+  document.getElementById('campo-tipo').style.display = ehExtrato ? '' : 'none';
+  document.getElementById('f-tipo').value = 'saida';
+
   // Preencher opções dos selects
   const selCat = document.getElementById('f-categoria');
   selCat.innerHTML = '<option value="">Selecione...</option>';
@@ -1465,6 +1660,9 @@ function abrirModal(cartaoId, id) {
 
   if (id) {
     const l = getLancamentos().find(x => x.id === id);
+    // Se a categoria salva não estiver mais na lista, adiciona para não perdê-la ao editar
+    if (l.categoria && !CATEGORIAS.includes(l.categoria)) selCat.add(new Option(l.categoria, l.categoria));
+    document.getElementById('f-tipo').value        = l.tipo || 'saida';
     document.getElementById('f-data').value        = l.data||'';
     document.getElementById('f-fornecedor').value  = l.fornecedor||'';
     document.getElementById('f-cnpj').value        = l.cnpj||'';
@@ -1590,9 +1788,13 @@ function salvarLancamento() {
   if (!valor || valor <= 0) { alert('Informe um valor válido.'); return; }
 
   const lista = getLancamentos();
+  const contaAtual = CARTOES.find(x => x.id === cartaoAtual) || {};
+  const lancAnterior = editandoId ? lista.find(x => x.id === editandoId) : null;
   const novo = {
     id: editandoId || crypto.randomUUID(),
     cartao: cartaoAtual,
+    anexos: (lancAnterior && lancAnterior.anexos) || [],
+    tipo: contaAtual.tipo === 'extrato' ? document.getElementById('f-tipo').value : ((lancAnterior && lancAnterior.tipo) || ''),
     data: document.getElementById('f-data').value,
     fornecedor: document.getElementById('f-fornecedor').value.trim(),
     cnpj: document.getElementById('f-cnpj').value.trim(),
@@ -1610,6 +1812,8 @@ function salvarLancamento() {
   };
   if (editandoId) { const idx = lista.findIndex(x => x.id === editandoId); lista[idx] = novo; }
   else lista.push(novo);
+  // Memoriza "fornecedor → categoria" para sugerir automaticamente nos próximos meses
+  aprenderCategorias([{ fornecedor: novo.fornecedor, categoria: novo.categoria }]);
   salvarTodos(lista);
   fecharModal();
   renderCartao(cartaoAtual);
@@ -1629,7 +1833,7 @@ function renderConciliacao() {
   const mes = document.getElementById('conc-mes').value;
   const ano = document.getElementById('conc-ano').value;
   const conc = filtrarPorMesAno(getLancamentos(), mes, ano).filter(l => l.status === 'Conciliado' && cartaoPermitido(l.cartao));
-  const total = conc.reduce((s,l)=>s+Number(l.valor),0);
+  const total = conc.reduce((s,l)=>s+valorContabil(l),0); // entradas do extrato abatem do total
 
   let html = `<div class="cards-grid" style="margin-bottom:20px">
     <div class="card-resumo verde"><h3>Total Conciliado</h3><div class="valor">${fmt(total)}</div>
@@ -1646,7 +1850,7 @@ function renderConciliacao() {
         <td>${l.data?new Date(l.data+'T00:00:00').toLocaleDateString('pt-BR'):'-'}</td>
         <td>${l.fornecedor||'-'}</td><td>${l.nf||'-'}</td><td>${l.descricao||'-'}</td>
         <td>${l.categoria||'-'}</td><td>${l.cc||'-'}</td><td>${l.responsavel||'-'}</td>
-        <td><strong>${fmt(l.valor)}</strong></td><td>${l.obs||'-'}</td></tr>`;
+        <td>${fmtLanc(l)}</td><td>${l.obs||'-'}</td></tr>`;
     });
   } else {
     html += `<tr><td colspan="11" style="text-align:center;padding:24px;color:#888">Nenhum lançamento conciliado neste período.</td></tr>`;
@@ -1673,8 +1877,8 @@ function renderRelatorio() {
     return (y>anoIni||(y===anoIni&&m>=mesIni)) && (y<anoFim||(y===anoFim&&m<=mesFim));
   }).sort((a,b)=>a.data>b.data?1:-1);
 
-  const total = dadosRelatorio.reduce((s,l)=>s+Number(l.valor),0);
-  const conc  = dadosRelatorio.filter(l=>l.status==='Conciliado').reduce((s,l)=>s+Number(l.valor),0);
+  const total = dadosRelatorio.reduce((s,l)=>s+valorContabil(l),0); // entradas do extrato abatem
+  const conc  = dadosRelatorio.filter(l=>l.status==='Conciliado').reduce((s,l)=>s+valorContabil(l),0);
 
   let html = `<div class="cards-grid" style="margin-bottom:20px">
     <div class="card-resumo"><h3>Total no Período</h3><div class="valor">${fmt(total)}</div><div class="sub">${dadosRelatorio.length} lançamento(s)</div></div>
@@ -1693,7 +1897,7 @@ function renderRelatorio() {
         <td>${l.data?new Date(l.data+'T00:00:00').toLocaleDateString('pt-BR'):'-'}</td>
         <td>${nomeC}</td><td>${l.fornecedor||'-'}</td><td>${l.nf||'-'}</td>
         <td>${l.descricao||'-'}</td><td>${l.categoria||'-'}</td><td>${l.cc||'-'}</td>
-        <td>${l.responsavel||'-'}</td><td><strong>${fmt(l.valor)}</strong></td>
+        <td>${l.responsavel||'-'}</td><td>${fmtLanc(l)}</td>
         <td>${l.parcela||'-'}</td><td>${badge(l.status)}</td></tr>`;
     });
   } else {
@@ -1707,10 +1911,11 @@ function renderRelatorio() {
 
 function exportarCSV() {
   if (!dadosRelatorio.length) { alert('Gere o relatório antes de exportar.'); return; }
-  const cols = ['Data','Cartão','Fornecedor','CNPJ','Nº NF','Série','Data NF','Descrição','Categoria','Centro de Custo','Responsável','Valor','Parcela','Status','Observações'];
+  const cols = ['Data','Cartão / Conta','Tipo','Fornecedor','CNPJ','Nº NF','Série','Data NF','Descrição','Categoria','Centro de Custo','Responsável','Valor','Parcela','Status','Observações'];
   const linhas = dadosRelatorio.map(l => [
     l.data?new Date(l.data+'T00:00:00').toLocaleDateString('pt-BR'):'',
     CARTOES.find(c=>c.id===l.cartao)?.nome||l.cartao,
+    l.tipo==='entrada'?'Entrada':(l.tipo==='saida'?'Saída':''),
     l.fornecedor||'',l.cnpj||'',l.nf||'',l.serie||'',
     l.dataNf?new Date(l.dataNf+'T00:00:00').toLocaleDateString('pt-BR'):'',
     l.descricao||'',l.categoria||'',l.cc||'',l.responsavel||'',
@@ -1733,11 +1938,16 @@ function exportarContabil() {
   const linhas = [];
 
   dadosRelatorio.forEach(l => {
-    const codDebito  = codsContabeis[l.categoria] || '';
-    const codCredito = codsCartoes[l.cartao] || '';
+    const codCategoria = codsContabeis[l.categoria] || '';
+    const codConta     = codsCartoes[l.cartao] || '';
 
-    if (!codDebito)  semCodCategoria.push(l.categoria || 'Sem categoria');
-    if (!codCredito) semCodCartao.push(CARTOES.find(c => c.id === l.cartao)?.nome || l.cartao);
+    // Despesa/saída: débito na categoria, crédito no cartão/banco.
+    // Entrada (recebimento no extrato): débito no banco, crédito na categoria.
+    const codDebito  = l.tipo === 'entrada' ? codConta : codCategoria;
+    const codCredito = l.tipo === 'entrada' ? codCategoria : codConta;
+
+    if (!codCategoria) semCodCategoria.push(l.categoria || 'Sem categoria');
+    if (!codConta)     semCodCartao.push(CARTOES.find(c => c.id === l.cartao)?.nome || l.cartao);
 
     if (!codDebito || !codCredito) return; // pula linhas sem código configurado
 
