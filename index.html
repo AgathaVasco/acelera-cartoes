@@ -366,7 +366,7 @@
       <div class="campo"><label>Cartão</label><input type="text" id="f-cartao" readonly style="background:#f4f6fa" /></div>
       <div class="campo" id="campo-tipo" style="display:none">
         <label>Tipo *</label>
-        <select id="f-tipo">
+        <select id="f-tipo" onchange="atualizarContasModal()">
           <option value="saida">Saída (pagamento)</option>
           <option value="entrada">Entrada (recebimento)</option>
         </select>
@@ -379,15 +379,23 @@
       <div class="campo full"><label>Descrição da Despesa *</label><input type="text" id="f-descricao" placeholder="Descreva a despesa..." /></div>
       <div class="campo">
         <label>Categoria *</label>
-        <select id="f-categoria"><option value="">Selecione...</option></select>
+        <select id="f-categoria" onchange="atualizarContasModal()"><option value="">Selecione...</option></select>
       </div>
-      <div class="campo">
+      <div class="campo" id="campo-cc">
         <label>Centro de Custo</label>
         <select id="f-cc"><option value="">Selecione...</option></select>
       </div>
-      <div class="campo"><label>Responsável</label><input type="text" id="f-responsavel" placeholder="Nome do responsável" /></div>
+      <div class="campo" id="campo-debito" style="display:none">
+        <label>Conta Débito (automática)</label>
+        <input type="text" id="f-debito" readonly style="background:#f4f6fa" />
+      </div>
+      <div class="campo" id="campo-credito" style="display:none">
+        <label>Conta Crédito (automática)</label>
+        <input type="text" id="f-credito" readonly style="background:#f4f6fa" />
+      </div>
+      <div class="campo" id="campo-responsavel"><label>Responsável</label><input type="text" id="f-responsavel" placeholder="Nome do responsável" /></div>
       <div class="campo"><label>Valor (R$) *</label><input type="number" id="f-valor" step="0.01" min="0" placeholder="0,00" /></div>
-      <div class="campo"><label>Parcela</label><input type="text" id="f-parcela" placeholder="Ex: 1/3" /></div>
+      <div class="campo" id="campo-parcela"><label>Parcela</label><input type="text" id="f-parcela" placeholder="Ex: 1/3" /></div>
       <div class="campo">
         <label>Status</label>
         <select id="f-status">
@@ -591,6 +599,16 @@ function aprenderCategorias(pares) {
 
 // Valor com sinal para totais: entradas (recebimentos) abatem, saídas/despesas somam
 function valorContabil(l) { return l.tipo === 'entrada' ? -Number(l.valor || 0) : Number(l.valor || 0); }
+
+// Contas contábeis do lançamento (débito/crédito), a partir dos códigos configurados em ⚙ Categorias.
+// Saída: débito na categoria, crédito no banco/cartão. Entrada: débito no banco, crédito na categoria.
+function contasContabeis(l) {
+  const codCategoria = getCodigosContabeis()[l.categoria] || '';
+  const codConta     = getCodigosCartoes()[l.cartao] || '';
+  return l.tipo === 'entrada'
+    ? { debito: codConta, credito: codCategoria }
+    : { debito: codCategoria, credito: codConta };
+}
 // Exibição do valor na tabela: entradas em verde com sinal +
 function fmtLanc(l) {
   return l.tipo === 'entrada'
@@ -1593,6 +1611,8 @@ function renderCartao(id) {
   }
 
   const thTipo = ehExtrato ? '<th>Tipo</th>' : '';
+  // No extrato, Centro/Responsável dão lugar às contas contábeis do lançamento
+  const thMeio = ehExtrato ? '<th>Conta Débito</th><th>Conta Crédito</th>' : '<th>Centro</th><th>Responsável</th>';
   const nCols = ehExtrato ? 12 : 11;
 
   const cont = document.getElementById(`content-${id}`);
@@ -1604,7 +1624,7 @@ function renderCartao(id) {
     <table class="tbl-fatura${ehExtrato ? ' tbl-extrato' : ''}">
       <thead><tr>
         <th>#</th><th>Data</th>${thTipo}<th>Fornecedor</th><th>Descrição</th>
-        <th>Categoria</th><th>Centro</th><th>Responsável</th>
+        <th>Categoria</th>${thMeio}
         <th>Valor</th><th>Parcela</th><th>Status</th><th>Ações</th>
       </tr></thead>
       <tbody>
@@ -1616,8 +1636,7 @@ function renderCartao(id) {
             <td>${l.fornecedor||'-'}</td>
             <td>${l.descricao||'-'}</td>
             <td>${l.categoria ? `<span class="badge badge-conciliado">${l.categoria}</span>` : '<span class="badge badge-pendente">Sem categoria</span>'}</td>
-            <td>${l.cc||'-'}</td>
-            <td>${l.responsavel||'-'}</td>
+            ${ehExtrato ? (() => { const ct = contasContabeis(l); return `<td>${ct.debito||'-'}</td><td>${ct.credito||'-'}</td>`; })() : `<td>${l.cc||'-'}</td><td>${l.responsavel||'-'}</td>`}
             <td>${fmtLanc(l)}</td>
             <td>${l.parcela||'-'}</td>
             <td>${badge(l.status)}</td>
@@ -1645,10 +1664,13 @@ function abrirModal(cartaoId, id) {
   document.getElementById('modal-titulo').textContent = id ? 'Editar Lançamento' : 'Novo Lançamento — ' + c.nome;
   document.getElementById('f-cartao').value = c.nome;
 
-  // Campo Tipo (Entrada/Saída) só aparece nas contas de extrato bancário
+  // Campo Tipo (Entrada/Saída) só aparece nas contas de extrato bancário.
+  // No extrato: esconde Centro de Custo, Responsável e Parcela; mostra as contas Débito/Crédito.
   const ehExtrato = c.tipo === 'extrato';
   document.getElementById('campo-tipo').style.display = ehExtrato ? '' : 'none';
   document.getElementById('f-tipo').value = 'saida';
+  ['campo-cc','campo-responsavel','campo-parcela'].forEach(cid => document.getElementById(cid).style.display = ehExtrato ? 'none' : '');
+  ['campo-debito','campo-credito'].forEach(cid => document.getElementById(cid).style.display = ehExtrato ? '' : 'none');
 
   // Preencher opções dos selects
   const selCat = document.getElementById('f-categoria');
@@ -1685,7 +1707,22 @@ function abrirModal(cartaoId, id) {
     document.getElementById('f-valor').value = '';
     document.getElementById('f-status').value = 'Pendente';
   }
+  atualizarContasModal();
   document.getElementById('overlay-lancamento').classList.add('aberto');
+}
+
+// Atualiza os campos Conta Débito/Crédito (somente leitura) conforme categoria e tipo escolhidos
+function atualizarContasModal() {
+  const campoDeb = document.getElementById('campo-debito');
+  if (!campoDeb || campoDeb.style.display === 'none') return;
+  const ct = contasContabeis({
+    cartao: cartaoAtual,
+    categoria: document.getElementById('f-categoria').value,
+    tipo: document.getElementById('f-tipo').value,
+  });
+  const aviso = 'configure em ⚙ Categorias';
+  document.getElementById('f-debito').value  = ct.debito  || aviso;
+  document.getElementById('f-credito').value = ct.credito || aviso;
 }
 
 function fecharModal() { document.getElementById('overlay-lancamento').classList.remove('aberto'); editandoId = null; }
