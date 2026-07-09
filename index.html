@@ -1960,32 +1960,62 @@ function renderRelatorio() {
   const total = dadosRelatorio.reduce((s,l)=>s+valorContabil(l),0); // entradas do extrato abatem
   const conc  = dadosRelatorio.filter(l=>l.status==='Conciliado').reduce((s,l)=>s+valorContabil(l),0);
 
+  // Se o relatório é só de extrato bancário, troca Centro/Responsável por Conta Débito/Crédito e tira Parcela
+  const contaSelecionada = CARTOES.find(c => c.id === relConta);
+  const soExtrato = (contaSelecionada && contaSelecionada.tipo === 'extrato') ||
+    (dadosRelatorio.length > 0 && dadosRelatorio.every(l => (CARTOES.find(c=>c.id===l.cartao)||{}).tipo === 'extrato'));
+
+  const thMeioRel = soExtrato ? '<th>Tipo</th><th>Conta Débito</th><th>Conta Crédito</th>' : '<th>Centro</th><th>Responsável</th>';
+  const thParcelaRel = soExtrato ? '' : '<th>Parcela</th>';
+  const nColsRel = 12;
+
+  let cardsRel;
+  if (soExtrato) {
+    const entradas = dadosRelatorio.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+Number(l.valor),0);
+    const saidas   = dadosRelatorio.filter(l=>l.tipo!=='entrada').reduce((s,l)=>s+Number(l.valor),0);
+    cardsRel = `
+      <div class="card-resumo verde"><h3>Entradas</h3><div class="valor">${fmt(entradas)}</div></div>
+      <div class="card-resumo laranja"><h3>Saídas</h3><div class="valor">${fmt(saidas)}</div></div>
+      <div class="card-resumo"><h3>Resultado do Período</h3><div class="valor">${fmt(entradas-saidas)}</div><div class="sub">${dadosRelatorio.length} lançamento(s)</div></div>`;
+  } else {
+    cardsRel = `
+      <div class="card-resumo"><h3>Total no Período</h3><div class="valor">${fmt(total)}</div><div class="sub">${dadosRelatorio.length} lançamento(s)</div></div>
+      <div class="card-resumo verde"><h3>Conciliado</h3><div class="valor">${fmt(conc)}</div></div>
+      <div class="card-resumo laranja"><h3>Pendente</h3><div class="valor">${fmt(total-conc)}</div></div>`;
+  }
+
   let html = `<div class="cards-grid" style="margin-bottom:20px">
-    <div class="card-resumo"><h3>Total no Período</h3><div class="valor">${fmt(total)}</div><div class="sub">${dadosRelatorio.length} lançamento(s)</div></div>
-    <div class="card-resumo verde"><h3>Conciliado</h3><div class="valor">${fmt(conc)}</div></div>
-    <div class="card-resumo laranja"><h3>Pendente</h3><div class="valor">${fmt(total-conc)}</div></div>
+    ${cardsRel}
     </div>
     <div class="tabela-wrap"><table>
     <thead><tr><th>#</th><th>Data</th><th>Cartão</th><th>Fornecedor</th><th>Nº NF</th>
-    <th>Descrição</th><th>Categoria</th><th>Centro</th><th>Responsável</th>
-    <th>Valor</th><th>Parcela</th><th>Status</th></tr></thead><tbody>`;
+    <th>Descrição</th><th>Categoria</th>${thMeioRel}
+    <th>Valor</th>${thParcelaRel}<th>Status</th></tr></thead><tbody>`;
 
   if (dadosRelatorio.length) {
     dadosRelatorio.forEach((l,i) => {
       const nomeC = CARTOES.find(c=>c.id===l.cartao)?.nome||l.cartao;
+      let tdMeio;
+      if (soExtrato) {
+        const ct = contasContabeis(l);
+        const tipoBadge = l.tipo === 'entrada' ? '<span class="badge badge-conciliado">Entrada</span>' : '<span class="badge badge-contestado">Saída</span>';
+        tdMeio = `<td>${tipoBadge}</td><td>${ct.debito||'-'}</td><td>${ct.credito||'-'}</td>`;
+      } else {
+        tdMeio = `<td>${l.cc||'-'}</td><td>${l.responsavel||'-'}</td>`;
+      }
       html += `<tr><td>${i+1}</td>
         <td>${l.data?new Date(l.data+'T00:00:00').toLocaleDateString('pt-BR'):'-'}</td>
         <td>${nomeC}</td><td>${l.fornecedor||'-'}</td><td>${l.nf||'-'}</td>
-        <td>${l.descricao||'-'}</td><td>${l.categoria||'-'}</td><td>${l.cc||'-'}</td>
-        <td>${l.responsavel||'-'}</td><td>${fmtLanc(l)}</td>
-        <td>${l.parcela||'-'}</td><td>${badge(l.status)}</td></tr>`;
+        <td>${l.descricao||'-'}</td><td>${l.categoria||'-'}</td>${tdMeio}
+        <td>${fmtLanc(l)}</td>
+        ${soExtrato ? '' : `<td>${l.parcela||'-'}</td>`}<td>${badge(l.status)}</td></tr>`;
     });
   } else {
-    html += `<tr><td colspan="12" style="text-align:center;padding:24px;color:#888">Nenhum lançamento no período selecionado.</td></tr>`;
+    html += `<tr><td colspan="${nColsRel}" style="text-align:center;padding:24px;color:#888">Nenhum lançamento no período selecionado.</td></tr>`;
   }
 
-  html += `</tbody><tfoot><tr><td colspan="9" style="text-align:right;font-weight:bold;padding:10px">TOTAL:</td>
-    <td style="font-weight:bold">${fmt(total)}</td><td colspan="2"></td></tr></tfoot></table></div>`;
+  html += `</tbody><tfoot><tr><td colspan="${soExtrato ? 10 : 9}" style="text-align:right;font-weight:bold;padding:10px">TOTAL${soExtrato ? ' (entradas − saídas)' : ''}:</td>
+    <td style="font-weight:bold">${fmt(soExtrato ? -total : total)}</td><td colspan="${soExtrato ? 1 : 2}"></td></tr></tfoot></table></div>`;
   document.getElementById('content-relatorio').innerHTML = html;
 }
 
