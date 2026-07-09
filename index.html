@@ -286,6 +286,8 @@
       <label>Mês / Ano:</label>
       <select id="dash-mes" onchange="renderDashboard()"></select>
       <select id="dash-ano" onchange="renderDashboard()"></select>
+      <label>Empresa:</label>
+      <select id="dash-empresa" onchange="renderDashboard()"></select>
     </div>
     <div class="cards-grid" id="dash-cards"></div>
     <h3 style="margin-bottom:14px;color:var(--azul)">Despesas por Categoria</h3>
@@ -327,6 +329,10 @@
       <label>Até:</label>
       <select id="rel-mes-fim"></select>
       <select id="rel-ano-fim"></select>
+      <label>Empresa:</label>
+      <select id="rel-empresa" onchange="popularRelContas()"></select>
+      <label>Cartão/Conta:</label>
+      <select id="rel-conta"></select>
       <button class="btn btn-azul" onclick="renderRelatorio()">Gerar</button>
     </div>
     <div class="exportar-bar">
@@ -1475,12 +1481,36 @@ function popularSelects() {
     if (!sel) return;
     sel.innerHTML = '';
     if (id.includes('mes')) {
+      if (id === 'dash-mes') sel.add(new Option('Todos os meses', 0)); // dashboard pode ver o ano inteiro
       MESES.forEach((m, i) => { const o = new Option(m, i+1); if (i+1===hoje.getMonth()+1) o.selected=true; sel.add(o); });
     } else {
       anos.forEach(a => { const o = new Option(a, a); if (a===anoAtual) o.selected=true; sel.add(o); });
     }
   });
   document.getElementById('mes-header').textContent = MESES[hoje.getMonth()] + ' / ' + anoAtual;
+}
+
+// Preenche os filtros de Empresa (Dashboard e Relatório), respeitando as permissões do usuário
+function popularFiltrosEmpresa() {
+  const empresas = [...new Set(cartoesPermitidos().map(c => c.empresa))];
+  ['dash-empresa', 'rel-empresa'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = '';
+    sel.add(new Option('Todas as empresas', ''));
+    empresas.forEach(e => sel.add(new Option(e, e)));
+  });
+  popularRelContas();
+}
+
+// Preenche o filtro Cartão/Conta do Relatório conforme a empresa escolhida
+function popularRelContas() {
+  const sel = document.getElementById('rel-conta');
+  if (!sel) return;
+  const emp = document.getElementById('rel-empresa') ? document.getElementById('rel-empresa').value : '';
+  sel.innerHTML = '';
+  sel.add(new Option('Todos', ''));
+  cartoesPermitidos().filter(c => !emp || c.empresa === emp).forEach(c => sel.add(new Option(c.nome, c.id)));
 }
 
 // ══════════════════════════════════════════════════════
@@ -1502,11 +1532,19 @@ function filtrarPorMesAno(lista, mes, ano) {
 // DASHBOARD
 // ══════════════════════════════════════════════════════
 function renderDashboard() {
-  const mes = document.getElementById('dash-mes').value;
+  const mes = Number(document.getElementById('dash-mes').value); // 0 = todos os meses
   const ano = document.getElementById('dash-ano').value;
+  const empSel = document.getElementById('dash-empresa') ? document.getElementById('dash-empresa').value : '';
   const todos = getLancamentos();
-  const filtrados = filtrarPorMesAno(todos, mes, ano).filter(l => cartaoPermitido(l.cartao));
-  const CARDS = cartoesPermitidos();
+  const filtrados = todos.filter(l => {
+    if (!l.data || !cartaoPermitido(l.cartao)) return false;
+    const d = new Date(l.data + 'T00:00:00');
+    if (d.getFullYear() !== Number(ano)) return false;
+    if (mes !== 0 && d.getMonth() + 1 !== mes) return false;
+    if (empSel) { const c = CARTOES.find(x => x.id === l.cartao); if (!c || c.empresa !== empSel) return false; }
+    return true;
+  });
+  const CARDS = cartoesPermitidos().filter(c => !empSel || c.empresa === empSel);
   let cardsHTML = '';
   let totalGeral = 0;
   CARDS.forEach(c => {
@@ -1611,9 +1649,10 @@ function renderCartao(id) {
   }
 
   const thTipo = ehExtrato ? '<th>Tipo</th>' : '';
-  // No extrato, Centro/Responsável dão lugar às contas contábeis do lançamento
+  // No extrato, Centro/Responsável dão lugar às contas contábeis; Parcela não existe em extrato
   const thMeio = ehExtrato ? '<th>Conta Débito</th><th>Conta Crédito</th>' : '<th>Centro</th><th>Responsável</th>';
-  const nCols = ehExtrato ? 12 : 11;
+  const thParcela = ehExtrato ? '' : '<th>Parcela</th>';
+  const nCols = 11;
 
   const cont = document.getElementById(`content-${id}`);
   cont.innerHTML += `
@@ -1625,7 +1664,7 @@ function renderCartao(id) {
       <thead><tr>
         <th>#</th><th>Data</th>${thTipo}<th>Fornecedor</th><th>Descrição</th>
         <th>Categoria</th>${thMeio}
-        <th>Valor</th><th>Parcela</th><th>Status</th><th>Ações</th>
+        <th>Valor</th>${thParcela}<th>Status</th><th>Ações</th>
       </tr></thead>
       <tbody>
         ${itens.length ? itens.map((l,i) => `
@@ -1638,7 +1677,7 @@ function renderCartao(id) {
             <td>${l.categoria ? `<span class="badge badge-conciliado">${l.categoria}</span>` : '<span class="badge badge-pendente">Sem categoria</span>'}</td>
             ${ehExtrato ? (() => { const ct = contasContabeis(l); return `<td>${ct.debito||'-'}</td><td>${ct.credito||'-'}</td>`; })() : `<td>${l.cc||'-'}</td><td>${l.responsavel||'-'}</td>`}
             <td>${fmtLanc(l)}</td>
-            <td>${l.parcela||'-'}</td>
+            ${ehExtrato ? '' : `<td>${l.parcela||'-'}</td>`}
             <td>${badge(l.status)}</td>
             <td>
               <button class="btn btn-azul btn-icon" onclick="abrirAnexos('${l.id}')" title="Notas / comprovantes">📎${(l.anexos&&l.anexos.length)?' '+l.anexos.length:''}</button>
@@ -1908,8 +1947,12 @@ function renderRelatorio() {
   const anoIni = Number(document.getElementById('rel-ano-ini').value);
   const mesFim = Number(document.getElementById('rel-mes-fim').value);
   const anoFim = Number(document.getElementById('rel-ano-fim').value);
+  const relEmp   = document.getElementById('rel-empresa') ? document.getElementById('rel-empresa').value : '';
+  const relConta = document.getElementById('rel-conta') ? document.getElementById('rel-conta').value : '';
   dadosRelatorio = getLancamentos().filter(l => {
     if (!l.data || !cartaoPermitido(l.cartao)) return false;
+    if (relConta && l.cartao !== relConta) return false;
+    if (relEmp) { const c = CARTOES.find(x => x.id === l.cartao); if (!c || c.empresa !== relEmp) return false; }
     const d = new Date(l.data+'T00:00:00'); const y=d.getFullYear(), m=d.getMonth()+1;
     return (y>anoIni||(y===anoIni&&m>=mesIni)) && (y<anoFim||(y===anoFim&&m<=mesFim));
   }).sort((a,b)=>a.data>b.data?1:-1);
@@ -2098,6 +2141,7 @@ async function iniciarApp() {
   if (!cods.itau) { cods.itau = '6598'; salvarCodigosCartoes(cods); }
   preencherSelects();
   popularSelects();
+  popularFiltrosEmpresa();
   renderDashboard();
 }
 
