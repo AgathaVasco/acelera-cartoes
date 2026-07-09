@@ -625,7 +625,7 @@ function fmtLanc(l) {
 // CATEGORIAS é sempre lido via getCategorias() — mantido como alias para compatibilidade
 let CATEGORIAS = getCategorias();
 
-const CENTROS = ['Administrativo','Comercial','Operacional','TI','Marketing','Financeiro','Diretoria'];
+const CENTROS = ['MKT','Comercial','Atendimento e CS','Cadastro','Financeiro','DHO','Projetos e governanças'];
 const MESES   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 // Preenche selects de categoria e centro
@@ -1721,8 +1721,9 @@ function abrirModal(cartaoId, id) {
 
   if (id) {
     const l = getLancamentos().find(x => x.id === id);
-    // Se a categoria salva não estiver mais na lista, adiciona para não perdê-la ao editar
+    // Se a categoria ou o centro salvos não estiverem mais na lista, adiciona para não perdê-los ao editar
     if (l.categoria && !CATEGORIAS.includes(l.categoria)) selCat.add(new Option(l.categoria, l.categoria));
+    if (l.cc && !CENTROS.includes(l.cc)) selCC.add(new Option(l.cc, l.cc));
     document.getElementById('f-tipo').value        = l.tipo || 'saida';
     document.getElementById('f-data').value        = l.data||'';
     document.getElementById('f-fornecedor').value  = l.fornecedor||'';
