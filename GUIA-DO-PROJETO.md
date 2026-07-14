@@ -16,6 +16,7 @@ Mantido na nuvem (GitHub) para nunca se perder.
   - Planoo Tecnologia → Extrato Planoo (conta corrente Itaú, com Entradas e Saídas)
 - **Login:** cada usuário entra com e-mail e senha. Tem "Esqueci minha senha".
 - **Categorias inteligentes:** quando você confirma uma categoria (na importação ou editando um lançamento), o app memoriza "fornecedor → categoria" e já sugere sozinho nos próximos meses.
+- **Plano de contas por empresa:** em ⚙ Categorias há um seletor "Plano da empresa" — cada empresa (Acelera, P4H, Planoo) tem suas próprias categorias e códigos contábeis. Enquanto uma empresa não for personalizada, ela usa o cadastro geral antigo.
 
 ### 2) Central Contábil P4H (arquivo no computador)
 - **Arquivo:** `P4H_Central_Automacoes_1.html` (abre direto no navegador, dois cliques)

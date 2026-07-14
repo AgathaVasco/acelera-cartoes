@@ -455,6 +455,11 @@
     </div>
 
     <strong style="display:block;margin-bottom:8px;color:var(--azul)">Categorias e Contas de Débito</strong>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:#fff8e6;border:1px solid #f0dfae;border-radius:9px;padding:9px 12px">
+      <label style="font-weight:bold;color:var(--azul);font-size:.9rem">Plano da empresa:</label>
+      <select id="cat-empresa" onchange="renderListaCategorias()"
+        style="flex:1;padding:7px 10px;border:1px solid #ccc;border-radius:7px;font-size:.92rem"></select>
+    </div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <input id="nova-cat-input" type="text" placeholder="Nova categoria..."
         style="flex:1;padding:9px 12px;border:1px solid #ccc;border-radius:8px;font-size:.95rem"
@@ -581,6 +586,32 @@ function getCategorias() { return _cfg.categorias_custom || CATEGORIAS_PADRAO; }
 function salvarCategorias(lista) { _cfg.categorias_custom = lista; salvarConfig('categorias_custom', lista); }
 function getCodigosContabeis() { return _cfg.codigos_contabeis || {}; }
 function salvarCodigosContabeis(obj) { _cfg.codigos_contabeis = obj; salvarConfig('codigos_contabeis', obj); }
+
+// ── Categorias e códigos contábeis POR EMPRESA ──
+// Cada empresa tem seu plano de contas. Enquanto uma empresa não tiver o seu próprio,
+// ela usa o antigo cadastro geral (assim nada do que já foi configurado se perde).
+function empresaDoCartao(cartaoId) { const c = CARTOES.find(x => x.id === cartaoId); return c ? c.empresa : ''; }
+
+function getCategoriasEmpresa(empresa) {
+  const todas = _cfg.categorias_empresa || {};
+  return todas[empresa] || getCategorias();
+}
+function salvarCategoriasEmpresa(empresa, lista) {
+  const todas = _cfg.categorias_empresa || {};
+  todas[empresa] = lista;
+  _cfg.categorias_empresa = todas;
+  salvarConfig('categorias_empresa', todas);
+}
+function getCodigosContabeisEmpresa(empresa) {
+  const todos = _cfg.codigos_contabeis_empresa || {};
+  return todos[empresa] || getCodigosContabeis();
+}
+function salvarCodigosContabeisEmpresa(empresa, obj) {
+  const todos = _cfg.codigos_contabeis_empresa || {};
+  todos[empresa] = obj;
+  _cfg.codigos_contabeis_empresa = todos;
+  salvarConfig('codigos_contabeis_empresa', todos);
+}
 function getCodigosCartoes() { return _cfg.codigos_cartoes || {}; }
 function salvarCodigosCartoes(obj) { _cfg.codigos_cartoes = obj; salvarConfig('codigos_cartoes', obj); }
 
@@ -609,7 +640,7 @@ function valorContabil(l) { return l.tipo === 'entrada' ? -Number(l.valor || 0) 
 // Contas contábeis do lançamento (débito/crédito), a partir dos códigos configurados em ⚙ Categorias.
 // Saída: débito na categoria, crédito no banco/cartão. Entrada: débito no banco, crédito na categoria.
 function contasContabeis(l) {
-  const codCategoria = getCodigosContabeis()[l.categoria] || '';
+  const codCategoria = getCodigosContabeisEmpresa(empresaDoCartao(l.cartao))[l.categoria] || '';
   const codConta     = getCodigosCartoes()[l.cartao] || '';
   return l.tipo === 'entrada'
     ? { debito: codConta, credito: codCategoria }
@@ -1113,10 +1144,19 @@ function abrirCategorias() {
   document.getElementById('cod-cartao-unicred').value = cods.unicred || '';
   document.getElementById('cod-cartao-itau').value = cods.itau || '';
   document.getElementById('cod-cartao-extrato-planoo').value = cods['extrato-planoo'] || '';
+  // Preenche o seletor de empresa (cada empresa tem seu plano de categorias/códigos)
+  const selEmp = document.getElementById('cat-empresa');
+  const anterior = selEmp.value;
+  selEmp.innerHTML = '';
+  [...new Set(cartoesPermitidos().map(c => c.empresa))].forEach(e => selEmp.add(new Option(e, e)));
+  if (anterior && [...selEmp.options].some(o => o.value === anterior)) selEmp.value = anterior;
   renderListaCategorias();
   document.getElementById('overlay-categorias').classList.add('aberto');
   document.getElementById('nova-cat-input').focus();
 }
+
+// Empresa selecionada na janela de categorias
+function empresaCatSelecionada() { return document.getElementById('cat-empresa').value; }
 
 function fecharCategorias() {
   document.getElementById('overlay-categorias').classList.remove('aberto');
@@ -1129,14 +1169,16 @@ function salvarCodCartao(cartaoId, valor) {
 }
 
 function salvarCodCategoria(catNome, valor) {
-  const cods = getCodigosContabeis();
+  const emp = empresaCatSelecionada();
+  const cods = { ...getCodigosContabeisEmpresa(emp) };
   cods[catNome] = valor.trim();
-  salvarCodigosContabeis(cods);
+  salvarCodigosContabeisEmpresa(emp, cods);
 }
 
 function renderListaCategorias() {
-  const cats = getCategorias();
-  const cods = getCodigosContabeis();
+  const emp = empresaCatSelecionada();
+  const cats = getCategoriasEmpresa(emp);
+  const cods = getCodigosContabeisEmpresa(emp);
   const lista = document.getElementById('lista-categorias');
   if (!cats.length) {
     lista.innerHTML = '<p style="color:#888;text-align:center;padding:20px">Nenhuma categoria cadastrada.</p>';
@@ -1156,24 +1198,24 @@ function adicionarCategoria() {
   const input = document.getElementById('nova-cat-input');
   const nome = input.value.trim();
   if (!nome) return;
-  const cats = getCategorias();
-  if (cats.includes(nome)) { alert('Categoria "' + nome + '" já existe.'); return; }
+  const emp = empresaCatSelecionada();
+  const cats = [...getCategoriasEmpresa(emp)];
+  if (cats.includes(nome)) { alert('Categoria "' + nome + '" já existe no plano de ' + emp + '.'); return; }
   const idx = cats.indexOf('Outros');
   if (idx >= 0) cats.splice(idx, 0, nome); else cats.push(nome);
-  salvarCategorias(cats);
-  CATEGORIAS = cats;
+  salvarCategoriasEmpresa(emp, cats);
   input.value = '';
   input.focus();
   renderListaCategorias();
 }
 
 function removerCategoria(idx) {
-  const cats = getCategorias();
+  const emp = empresaCatSelecionada();
+  const cats = [...getCategoriasEmpresa(emp)];
   const nome = cats[idx];
-  if (!confirm(`Remover a categoria "${nome}"?`)) return;
+  if (!confirm(`Remover a categoria "${nome}" do plano de ${emp}?`)) return;
   cats.splice(idx, 1);
-  salvarCategorias(cats);
-  CATEGORIAS = cats;
+  salvarCategoriasEmpresa(emp, cats);
   renderListaCategorias();
 }
 
@@ -1346,10 +1388,11 @@ function mostrarTabelaRevisao(items) {
       </tr></thead>
       <tbody>`;
 
+  const catsImp = getCategoriasEmpresa(empresaDoCartao(cartaoImportando));
   items.forEach((item, i) => {
     const clsCat = item.categoria ? 'com-cat' : 'sem-cat';
     // Garante que a categoria sugerida apareça mesmo que ainda não esteja na lista do usuário
-    const opcoes = CATEGORIAS.includes(item.categoria) || !item.categoria ? CATEGORIAS : [...CATEGORIAS, item.categoria];
+    const opcoes = catsImp.includes(item.categoria) || !item.categoria ? catsImp : [...catsImp, item.categoria];
     const tdTipo = !temTipo ? '' : item.tipo === 'entrada'
       ? '<td><span class="badge badge-conciliado">Entrada</span></td>'
       : '<td><span class="badge badge-contestado">Saída</span></td>';
@@ -1711,10 +1754,11 @@ function abrirModal(cartaoId, id) {
   ['campo-cc','campo-responsavel','campo-parcela'].forEach(cid => document.getElementById(cid).style.display = ehExtrato ? 'none' : '');
   ['campo-debito','campo-credito'].forEach(cid => document.getElementById(cid).style.display = ehExtrato ? '' : 'none');
 
-  // Preencher opções dos selects
+  // Preencher opções dos selects (categorias do plano da empresa deste cartão/conta)
+  const catsEmpresa = getCategoriasEmpresa(c.empresa);
   const selCat = document.getElementById('f-categoria');
   selCat.innerHTML = '<option value="">Selecione...</option>';
-  CATEGORIAS.forEach(cat => selCat.add(new Option(cat, cat)));
+  catsEmpresa.forEach(cat => selCat.add(new Option(cat, cat)));
   const selCC = document.getElementById('f-cc');
   selCC.innerHTML = '<option value="">Selecione...</option>';
   CENTROS.forEach(cc => selCC.add(new Option(cc, cc)));
@@ -1722,7 +1766,7 @@ function abrirModal(cartaoId, id) {
   if (id) {
     const l = getLancamentos().find(x => x.id === id);
     // Se a categoria ou o centro salvos não estiverem mais na lista, adiciona para não perdê-los ao editar
-    if (l.categoria && !CATEGORIAS.includes(l.categoria)) selCat.add(new Option(l.categoria, l.categoria));
+    if (l.categoria && !catsEmpresa.includes(l.categoria)) selCat.add(new Option(l.categoria, l.categoria));
     if (l.cc && !CENTROS.includes(l.cc)) selCC.add(new Option(l.cc, l.cc));
     document.getElementById('f-tipo').value        = l.tipo || 'saida';
     document.getElementById('f-data').value        = l.data||'';
@@ -2041,15 +2085,15 @@ function exportarCSV() {
 function exportarContabil() {
   if (!dadosRelatorio.length) { alert('Gere o relatório antes de exportar.'); return; }
 
-  const codsContabeis = getCodigosContabeis();
-  const codsCartoes   = getCodigosCartoes();
+  const codsCartoes = getCodigosCartoes();
 
   const semCodCategoria = [];
   const semCodCartao    = [];
   const linhas = [];
 
   dadosRelatorio.forEach(l => {
-    const codCategoria = codsContabeis[l.categoria] || '';
+    // Código da categoria conforme o plano da empresa dona do cartão/conta
+    const codCategoria = getCodigosContabeisEmpresa(empresaDoCartao(l.cartao))[l.categoria] || '';
     const codConta     = codsCartoes[l.cartao] || '';
 
     // Despesa/saída: débito na categoria, crédito no cartão/banco.
