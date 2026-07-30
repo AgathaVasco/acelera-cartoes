@@ -647,10 +647,12 @@ function contasContabeis(l) {
     : { debito: codCategoria, credito: codConta };
 }
 // Exibição do valor na tabela: entradas em verde com sinal +
-function fmtLanc(l) {
-  return l.tipo === 'entrada'
-    ? `<strong style="color:var(--verde)">+ ${fmt(l.valor)}</strong>`
-    : `<strong>${fmt(l.valor)}</strong>`;
+function fmtLanc(l, ehExtrato) {
+  if (l.tipo !== 'entrada') return `<strong>${fmt(l.valor)}</strong>`;
+  // Extrato: entrada é dinheiro que entra (verde, "+"). Cartão: estorno/reembolso ABATE a fatura (verde, "−").
+  const ext = ehExtrato !== undefined ? ehExtrato : (CARTOES.find(c => c.id === l.cartao) || {}).tipo === 'extrato';
+  const sinal = ext ? '+' : '−';
+  return `<strong style="color:var(--verde)">${sinal} ${fmt(l.valor)}</strong>`;
 }
 
 // CATEGORIAS é sempre lido via getCategorias() — mantido como alias para compatibilidade
@@ -802,6 +804,18 @@ function normalizarTexto(txt) {
 }
 
 // ══════════════════════════════════════════════════════
+// VALOR DA FATURA — trata ESTORNO / REEMBOLSO / CRÉDITO (valor negativo)
+// Aceita o sinal "-" (ou traços parecidos) antes ou depois do número, e "CR" no fim.
+// Retorna { valor, tipo }: tipo 'entrada' = crédito que ABATE a fatura; '' = despesa normal.
+// ══════════════════════════════════════════════════════
+function interpretarValorFatura(str) {
+  const s = String(str || '');
+  const negativo = /[-–—−]/.test(s) || /\bCR\b/i.test(s);
+  const num = parseFloat(s.replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+  return { valor: Math.abs(num) || 0, tipo: negativo ? 'entrada' : '' };
+}
+
+// ══════════════════════════════════════════════════════
 // PARSER UNICRED
 // ══════════════════════════════════════════════════════
 function parsearUnicred(texto, textoRaw) {
@@ -828,20 +842,20 @@ function parsearUnicred(texto, textoRaw) {
       const endPos = i + 1 < tokens.length ? tokens[i + 1].start : flat.length;
       const chunk = flat.substring(t.contentStart, endPos);
 
-      // Extrai o valor: último número no formato X,XX ou X.XXX,XX no chunk
-      const valorMatch = chunk.match(/(\d{1,3}(?:[.,]\d{3})*,\d{2})(?=[^\d]|$)/);
+      // Extrai o valor: número X,XX ou X.XXX,XX, podendo ter sinal "-"/"CR" (estorno) antes ou depois
+      const valorMatch = chunk.match(/(-?\s?\d{1,3}(?:[.,]\d{3})*,\d{2}\s?(?:-|CR)?)(?=[^\d]|$)/i);
       if (!valorMatch) continue;
 
-      const valorRaw = valorMatch[1].replace(/\./g, '').replace(',', '.');
-      const valor = parseFloat(valorRaw);
-      if (!valor || valor <= 0) continue;
+      const { valor, tipo } = interpretarValorFatura(valorMatch[1]);
+      if (!valor) continue;
 
       // Descrição: tudo antes do valor (removendo "R$" se houver)
       const amtIdx = chunk.indexOf(valorMatch[1]);
       const descRaw = chunk.substring(0, amtIdx).replace(/R\$\s*$/, '').trim();
 
       if (/Pagamento\s*Recebido|PagamentoRecebido/i.test(descRaw)) continue;
-      if (valor > 20000) continue; // provavelmente total da fatura, não lançamento
+      // Ignora só o TOTAL da fatura (despesa positiva muito alta). Reembolsos altos (crédito) passam.
+      if (tipo !== 'entrada' && valor > 20000) continue;
 
       const mesNum = MESES_PT[t.mes];
       const dataISO = `${anoAtual}-${String(mesNum).padStart(2, '0')}-${t.dia.padStart(2, '0')}`;
@@ -850,7 +864,7 @@ function parsearUnicred(texto, textoRaw) {
       const parcela = parcMatch ? parcMatch[1] : '';
       const fornecedor = (descRaw.replace(/Parc[.\s]*\d+\/\d+/i, '').trim() || descRaw).substring(0, 60);
 
-      lancamentos.push({ data: dataISO, fornecedor, descricao: descRaw || fornecedor, parcela, valor, categoria: sugerirCategoria(descRaw) });
+      lancamentos.push({ data: dataISO, fornecedor, descricao: descRaw || fornecedor, parcela, valor, tipo, categoria: sugerirCategoria(descRaw) });
     }
 
     // Sem deduplicação: dois lançamentos com mesmo valor/data podem ser legítimos
@@ -888,7 +902,7 @@ function parsearItau(texto) {
   // A fatura tem DUAS COLUNAS lado a lado — as linhas extraídas podem misturar
   // as colunas, com o valor no MEIO da linha (não só no final).
   // Captura: DD/MM DESCRIÇÃO VALOR em qualquer posição, podendo haver mais de um por linha.
-  const RE_LINHA = /(\d{2})\/(\d{2})\s+(.+?)\s*(-?\s?\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.\/])/g;
+  const RE_LINHA = /(\d{2})\/(\d{2})\s+(.+?)\s*(-?\s?\d{1,3}(?:\.\d{3})*,\d{2}\s?-?)(?![\d,.\/])/g;
   // Portador: "RENATO CISZ (final 7237)"
   const RE_PORTADOR = /^(.+?)\s*\(final\s*\d{4}\)/i;
 
@@ -913,7 +927,7 @@ function parsearItau(texto) {
     // Descarta "descrições" que são na verdade datas de parcela soltas (ex: "01/03")
     if (!desc || /^\.?\s*$/.test(desc)) continue;
 
-    const valor = parseFloat(m[4].replace(/\s/g, '').replace(/\./g, '').replace(',', '.'));
+    const { valor, tipo } = interpretarValorFatura(m[4]); // trata estorno/reembolso (valor negativo)
     if (!valor) continue;
 
     // Categoria do Itaú: pode estar no resto da linha (colunas misturadas) ou na linha seguinte
@@ -950,6 +964,7 @@ function parsearItau(texto) {
       descricao: desc,
       parcela,
       valor,
+      tipo,
       responsavel: portadorAtual,
       categoria: sugerirCategoria(desc) || catItau,
     });
@@ -1004,17 +1019,16 @@ function parsearBB(texto) {
 
     if (IGNORAR.test(linha) || !linha) continue;
 
-    // Padrão BB: DD/MM DESCRICAO [PARC XX/XX] [CIDADE] BR VALOR
-    const match = linha.match(/^(\d{2})\/(\d{2})\s+(.+?)\s+BR\s+([\d.,]+)$/);
+    // Padrão BB: DD/MM DESCRICAO [PARC XX/XX] [CIDADE] BR VALOR (valor pode ter "-"/"CR" = estorno)
+    const match = linha.match(/^(\d{2})\/(\d{2})\s+(.+?)\s+BR\s+(-?[\d.,]+\s?(?:-|CR)?)$/i);
     if (!match) continue;
 
     const dia = match[1];
     const mes = parseInt(match[2]);
     const desc = match[3].trim();
-    const valorStr = match[4].replace('.', '').replace(',', '.');
-    const valor = parseFloat(valorStr);
+    const { valor, tipo } = interpretarValorFatura(match[4]); // trata estorno/reembolso
 
-    if (!valor || valor <= 0) continue;
+    if (!valor) continue;
     if (/PGTO DEBITO|Pagamento Recebido/i.test(desc)) continue;
 
     const dataISO = `${anoAtual}-${String(mes).padStart(2,'0')}-${dia}`;
@@ -1035,6 +1049,7 @@ function parsearBB(texto) {
       descricao: desc + (portadorAtual ? ` [${portadorAtual}]` : ''),
       parcela,
       valor,
+      tipo,
       responsavel: portadorAtual,
       categoria: sugerirCategoria(desc),
     });
@@ -1364,15 +1379,22 @@ async function lerPDF(input) {
 }
 
 function mostrarTabelaRevisao(items) {
+  const ehExtratoImp = (CARTOES.find(c => c.id === cartaoImportando) || {}).tipo === 'extrato';
   const semCat = items.filter(i => !i.categoria).length;
-  const temTipo = items.some(i => i.tipo); // extrato: mostra coluna Entrada/Saída
+  // temTipo: mostra coluna Tipo. Sempre no extrato; no cartão só quando há estorno/reembolso.
+  const temTipo = items.some(i => i.tipo);
   const total = items.reduce((s, i) => s + valorContabil(i), 0);
   const entradas = items.filter(i => i.tipo === 'entrada').reduce((s, i) => s + i.valor, 0);
   const saidas   = items.filter(i => i.tipo !== 'entrada').reduce((s, i) => s + i.valor, 0);
+  const displayTotal = ehExtratoImp ? -total : total; // extrato mostra resultado; cartão mostra valor da fatura
 
-  const resumo = temTipo
-    ? `Entradas: <strong style="color:var(--verde)">${fmt(entradas)}</strong> · Saídas: <strong style="color:var(--laranja)">${fmt(saidas)}</strong>`
-    : `Total: <strong>${fmt(total)}</strong>`;
+  let resumo;
+  if (!temTipo) resumo = `Total: <strong>${fmt(total)}</strong>`;
+  else if (ehExtratoImp) resumo = `Entradas: <strong style="color:var(--verde)">${fmt(entradas)}</strong> · Saídas: <strong style="color:var(--laranja)">${fmt(saidas)}</strong>`;
+  else resumo = `Compras: <strong>${fmt(saidas)}</strong> · Estornos/Reembolsos: <strong style="color:var(--verde)">${fmt(entradas)}</strong> · Fatura: <strong>${fmt(total)}</strong>`;
+
+  const rotuloEntrada = ehExtratoImp ? 'Entrada' : 'Estorno';
+  const rotuloSaida   = ehExtratoImp ? 'Saída' : 'Compra';
 
   let html = `
     <div class="info-box">
@@ -1394,14 +1416,14 @@ function mostrarTabelaRevisao(items) {
     // Garante que a categoria sugerida apareça mesmo que ainda não esteja na lista do usuário
     const opcoes = catsImp.includes(item.categoria) || !item.categoria ? catsImp : [...catsImp, item.categoria];
     const tdTipo = !temTipo ? '' : item.tipo === 'entrada'
-      ? '<td><span class="badge badge-conciliado">Entrada</span></td>'
-      : '<td><span class="badge badge-contestado">Saída</span></td>';
+      ? `<td><span class="badge badge-conciliado">${rotuloEntrada}</span></td>`
+      : `<td><span class="badge badge-contestado">${rotuloSaida}</span></td>`;
     html += `<tr>
       <td><input type="checkbox" class="chk-item" data-idx="${i}" checked onchange="atualizarTotalPreview()" /></td>
       <td>${item.data ? new Date(item.data+'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
       ${tdTipo}
       <td>${item.descricao || item.fornecedor}</td>
-      <td>${fmtLanc(item)}</td>
+      <td>${fmtLanc(item, ehExtratoImp)}</td>
       <td>${item.parcela || '-'}</td>
       <td>${item.responsavel || '-'}</td>
       <td>
@@ -1416,8 +1438,8 @@ function mostrarTabelaRevisao(items) {
   html += `</tbody>
     <tfoot>
       <tr style="background:#f0f4ff;font-weight:bold;border-top:2px solid #c0c8e0">
-        <td colspan="${temTipo ? 4 : 3}" style="padding:10px 8px;text-align:right">${temTipo ? 'Resultado selecionado (entradas − saídas):' : 'Total selecionado:'}</td>
-        <td id="total-imp-preview" style="padding:10px 8px;font-size:1.05rem;color:#1a237e">${fmt(temTipo ? -total : total)}</td>
+        <td colspan="${temTipo ? 4 : 3}" style="padding:10px 8px;text-align:right">${ehExtratoImp ? 'Resultado selecionado (entradas − saídas):' : 'Total da fatura selecionado:'}</td>
+        <td id="total-imp-preview" style="padding:10px 8px;font-size:1.05rem;color:#1a237e">${fmt(displayTotal)}</td>
         <td colspan="3"></td>
       </tr>
     </tfoot>
@@ -1431,14 +1453,14 @@ function atualizarTotalPreview() {
   const totalEl = document.getElementById('total-imp-preview');
   if (!totalEl) return;
   const checados = [...document.querySelectorAll('.chk-item:checked')].map(c => Number(c.dataset.idx));
-  const temTipo = lancamentosImportados.some(i => i && i.tipo);
+  const ehExtratoImp = (CARTOES.find(c => c.id === cartaoImportando) || {}).tipo === 'extrato';
   const soma = checados.reduce((s, i) => {
     const item = lancamentosImportados[i];
     if (!item) return s;
-    return s + (temTipo ? valorContabil(item) : Number(item.valor || 0));
+    return s + valorContabil(item); // estorno (entrada) abate
   }, 0);
-  // No extrato o "total" é o resultado líquido: entradas abatem, saídas somam
-  totalEl.textContent = fmt(temTipo ? -soma : soma);
+  // Extrato: mostra resultado líquido (entradas − saídas). Cartão: mostra o valor da fatura já com estornos abatidos.
+  totalEl.textContent = fmt(ehExtratoImp ? -soma : soma);
 }
 
 function toggleTodos(chk) {
@@ -1601,8 +1623,8 @@ function renderDashboard() {
         <div class="sub">${itens.length} lançamento(s)</div></div>`;
       return;
     }
-    const total = itens.reduce((s, l) => s + Number(l.valor), 0);
-    const conc  = itens.filter(l => l.status === 'Conciliado').reduce((s, l) => s + Number(l.valor), 0);
+    const total = itens.reduce((s, l) => s + valorContabil(l), 0); // estornos abatem
+    const conc  = itens.filter(l => l.status === 'Conciliado').reduce((s, l) => s + valorContabil(l), 0);
     totalGeral += total;
     cardsHTML += `<div class="card-resumo"><h3>${c.nome}</h3><div class="valor">${fmt(total)}</div>
       <div class="sub">Conciliado: ${fmt(conc)} | Pendente: ${fmt(total-conc)}</div>
@@ -1621,7 +1643,7 @@ function renderDashboard() {
   let linhas = `<thead><tr><th>Categoria</th>${CARDS.map(c=>`<th>${c.nome}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
   let totCols = CARDS.map(() => 0), totG = 0;
   cats.forEach(cat => {
-    const vals = CARDS.map(c => filtrados.filter(l=>l.cartao===c.id&&l.categoria===cat).reduce((s,l)=>s+Number(l.valor),0));
+    const vals = CARDS.map(c => filtrados.filter(l=>l.cartao===c.id&&l.categoria===cat).reduce((s,l)=>s+valorContabil(l),0));
     const tot = vals.reduce((a,b)=>a+b,0);
     vals.forEach((v,i) => totCols[i]+=v); totG+=tot;
     linhas += `<tr><td>${cat}</td>${vals.map(v=>`<td>${v?fmt(v):'-'}</td>`).join('')}<td><strong>${fmt(tot)}</strong></td></tr>`;
@@ -1671,8 +1693,9 @@ function renderCartao(id) {
   const ano = anoSel;
   const todos = getLancamentos();
   const itens = filtrarPorMesAno(todos.filter(l => l.cartao === id), mes, ano);
-  const total = itens.reduce((s,l)=>s+Number(l.valor),0);
-  const conc  = itens.filter(l=>l.status==='Conciliado').reduce((s,l)=>s+Number(l.valor),0);
+  // valorContabil: estornos/reembolsos (tipo 'entrada') ABATEM o total da fatura
+  const total = itens.reduce((s,l)=>s+valorContabil(l),0);
+  const conc  = itens.filter(l=>l.status==='Conciliado').reduce((s,l)=>s+valorContabil(l),0);
 
   let cardsResumo;
   if (ehExtrato) {
@@ -1719,7 +1742,7 @@ function renderCartao(id) {
             <td>${l.descricao||'-'}</td>
             <td>${l.categoria ? `<span class="badge badge-conciliado">${l.categoria}</span>` : '<span class="badge badge-pendente">Sem categoria</span>'}</td>
             ${ehExtrato ? (() => { const ct = contasContabeis(l); return `<td>${ct.debito||'-'}</td><td>${ct.credito||'-'}</td>`; })() : `<td>${l.cc||'-'}</td><td>${l.responsavel||'-'}</td>`}
-            <td>${fmtLanc(l)}</td>
+            <td>${fmtLanc(l, ehExtrato)}</td>
             ${ehExtrato ? '' : `<td>${l.parcela||'-'}</td>`}
             <td>${badge(l.status)}</td>
             <td>
@@ -1746,10 +1769,14 @@ function abrirModal(cartaoId, id) {
   document.getElementById('modal-titulo').textContent = id ? 'Editar Lançamento' : 'Novo Lançamento — ' + c.nome;
   document.getElementById('f-cartao').value = c.nome;
 
-  // Campo Tipo (Entrada/Saída) só aparece nas contas de extrato bancário.
-  // No extrato: esconde Centro de Custo, Responsável e Parcela; mostra as contas Débito/Crédito.
+  // Campo Tipo aparece sempre. No extrato: Saída/Entrada; no cartão: Compra / Estorno-Reembolso.
+  // No extrato esconde Centro de Custo, Responsável e Parcela e mostra as contas Débito/Crédito.
   const ehExtrato = c.tipo === 'extrato';
-  document.getElementById('campo-tipo').style.display = ehExtrato ? '' : 'none';
+  document.getElementById('campo-tipo').style.display = '';
+  const optS = document.querySelector('#f-tipo option[value="saida"]');
+  const optE = document.querySelector('#f-tipo option[value="entrada"]');
+  optS.textContent = ehExtrato ? 'Saída (pagamento)'    : 'Compra / Despesa';
+  optE.textContent = ehExtrato ? 'Entrada (recebimento)' : 'Estorno / Reembolso';
   document.getElementById('f-tipo').value = 'saida';
   ['campo-cc','campo-responsavel','campo-parcela'].forEach(cid => document.getElementById(cid).style.display = ehExtrato ? 'none' : '');
   ['campo-debito','campo-credito'].forEach(cid => document.getElementById(cid).style.display = ehExtrato ? '' : 'none');
@@ -1915,7 +1942,7 @@ function salvarLancamento() {
     id: editandoId || crypto.randomUUID(),
     cartao: cartaoAtual,
     anexos: (lancAnterior && lancAnterior.anexos) || [],
-    tipo: contaAtual.tipo === 'extrato' ? document.getElementById('f-tipo').value : ((lancAnterior && lancAnterior.tipo) || ''),
+    tipo: document.getElementById('f-tipo').value, // 'saida'/'' = despesa, 'entrada' = estorno/reembolso
     data: document.getElementById('f-data').value,
     fornecedor: document.getElementById('f-fornecedor').value.trim(),
     cnpj: document.getElementById('f-cnpj').value.trim(),
