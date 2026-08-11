@@ -568,12 +568,17 @@ function toRow(l) {
     anexos: Array.isArray(l.anexos) ? l.anexos : [] };
 }
 function fromRow(r) {
+  // Normaliza valores negativos antigos (importados antes da correção de estorno):
+  // valor guardado como negativo vira valor positivo + tipo 'entrada' (estorno/reembolso).
+  let valor = Number(r.valor) || 0;
+  let tipo = r.tipo || '';
+  if (valor < 0) { valor = Math.abs(valor); if (!tipo) tipo = 'entrada'; }
   return { id:r.id, cartao:r.cartao||'', data:r.data||'', fornecedor:r.fornecedor||'',
     cnpj:r.cnpj||'', nf:r.nf||'', serie:r.serie||'', dataNf:r.data_nf||'',
     descricao:r.descricao||'', categoria:r.categoria||'', cc:r.cc||'',
-    responsavel:r.responsavel||'', valor:Number(r.valor)||0, parcela:r.parcela||'',
+    responsavel:r.responsavel||'', valor, parcela:r.parcela||'',
     status:r.status||'Pendente', obs:r.obs||'', competencia:r.competencia||'',
-    tipo:r.tipo||'',
+    tipo,
     anexos: Array.isArray(r.anexos) ? r.anexos : [] };
 }
 
@@ -1928,12 +1933,17 @@ async function excluirAnexo(i) {
 }
 
 function salvarLancamento() {
-  const valor = parseFloat(document.getElementById('f-valor').value);
+  const valorDigitado = parseFloat(document.getElementById('f-valor').value);
   if (!document.getElementById('f-data').value) { alert('Informe a data da compra.'); return; }
   if (!document.getElementById('f-fornecedor').value.trim()) { alert('Informe o fornecedor.'); return; }
   if (!document.getElementById('f-descricao').value.trim()) { alert('Informe a descrição.'); return; }
   if (!document.getElementById('f-categoria').value) { alert('Selecione a categoria.'); return; }
-  if (!valor || valor <= 0) { alert('Informe um valor válido.'); return; }
+  if (!valorDigitado || valorDigitado === 0 || isNaN(valorDigitado)) { alert('Informe um valor válido.'); return; }
+
+  // Valor negativo digitado = estorno/reembolso: guarda positivo e marca como crédito (abate a fatura)
+  let tipo = document.getElementById('f-tipo').value;
+  let valor = valorDigitado;
+  if (valor < 0) { valor = Math.abs(valor); tipo = 'entrada'; }
 
   const lista = getLancamentos();
   const contaAtual = CARTOES.find(x => x.id === cartaoAtual) || {};
@@ -1942,7 +1952,7 @@ function salvarLancamento() {
     id: editandoId || crypto.randomUUID(),
     cartao: cartaoAtual,
     anexos: (lancAnterior && lancAnterior.anexos) || [],
-    tipo: document.getElementById('f-tipo').value, // 'saida'/'' = despesa, 'entrada' = estorno/reembolso
+    tipo, // 'saida'/'' = despesa, 'entrada' = estorno/reembolso
     data: document.getElementById('f-data').value,
     fornecedor: document.getElementById('f-fornecedor').value.trim(),
     cnpj: document.getElementById('f-cnpj').value.trim(),
